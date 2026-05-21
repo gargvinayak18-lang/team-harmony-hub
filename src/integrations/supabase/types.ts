@@ -14,16 +14,156 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      attendance: {
+        Row: {
+          clock_in: string | null
+          clock_out: string | null
+          created_at: string
+          date: string
+          employee_id: string
+          id: string
+        }
+        Insert: {
+          clock_in?: string | null
+          clock_out?: string | null
+          created_at?: string
+          date?: string
+          employee_id: string
+          id?: string
+        }
+        Update: {
+          clock_in?: string | null
+          clock_out?: string | null
+          created_at?: string
+          date?: string
+          employee_id?: string
+          id?: string
+        }
+        Relationships: []
+      }
+      profiles: {
+        Row: {
+          created_at: string
+          department: Database["public"]["Enums"]["department"] | null
+          email: string
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          department?: Database["public"]["Enums"]["department"] | null
+          email: string
+          id: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          department?: Database["public"]["Enums"]["department"] | null
+          email?: string
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      tasks: {
+        Row: {
+          assignee_id: string
+          assigner_id: string
+          created_at: string
+          description: string | null
+          due_date: string | null
+          id: string
+          status: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          assignee_id: string
+          assigner_id: string
+          created_at?: string
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          status?: Database["public"]["Enums"]["task_status"]
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          assignee_id?: string
+          assigner_id?: string
+          created_at?: string
+          description?: string | null
+          due_date?: string | null
+          id?: string
+          status?: Database["public"]["Enums"]["task_status"]
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      user_roles: {
+        Row: {
+          created_at: string
+          id: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          role: Database["public"]["Enums"]["app_role"]
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      can_assign: {
+        Args: { _assignee: string; _assigner: string }
+        Returns: boolean
+      }
+      can_view_task: {
+        Args: { _assignee: string; _assigner: string; _user: string }
+        Returns: boolean
+      }
+      get_department: {
+        Args: { _user_id: string }
+        Returns: Database["public"]["Enums"]["department"]
+      }
+      get_roles: {
+        Args: { _user_id: string }
+        Returns: Database["public"]["Enums"]["app_role"][]
+      }
+      has_role: {
+        Args: {
+          _role: Database["public"]["Enums"]["app_role"]
+          _user_id: string
+        }
+        Returns: boolean
+      }
+      is_admin: { Args: { _user_id: string }; Returns: boolean }
     }
     Enums: {
-      [_ in never]: never
+      app_role:
+        | "global_admin"
+        | "tech_pm"
+        | "tech_sr_dev"
+        | "tech_jr_dev"
+        | "marketing_head"
+        | "marketing_staff"
+        | "hr_head"
+        | "hr_staff"
+      department: "tech" | "marketing" | "hr"
+      task_status: "todo" | "in_progress" | "done"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -150,6 +290,19 @@ export type CompositeTypes<
 
 export const Constants = {
   public: {
-    Enums: {},
+    Enums: {
+      app_role: [
+        "global_admin",
+        "tech_pm",
+        "tech_sr_dev",
+        "tech_jr_dev",
+        "marketing_head",
+        "marketing_staff",
+        "hr_head",
+        "hr_staff",
+      ],
+      department: ["tech", "marketing", "hr"],
+      task_status: ["todo", "in_progress", "done"],
+    },
   },
 } as const
