@@ -41,9 +41,43 @@ export type Database = {
         }
         Relationships: []
       }
+      admin_notes: {
+        Row: {
+          content: string
+          created_at: string
+          created_by: string
+          employee_id: string
+          id: string
+          period_start: string
+          period_type: string
+          updated_at: string
+        }
+        Insert: {
+          content: string
+          created_at?: string
+          created_by: string
+          employee_id: string
+          id?: string
+          period_start: string
+          period_type: string
+          updated_at?: string
+        }
+        Update: {
+          content?: string
+          created_at?: string
+          created_by?: string
+          employee_id?: string
+          id?: string
+          period_start?: string
+          period_type?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
+          custom_id: string | null
           department: Database["public"]["Enums"]["department"] | null
           email: string
           id: string
@@ -51,6 +85,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string
+          custom_id?: string | null
           department?: Database["public"]["Enums"]["department"] | null
           email: string
           id: string
@@ -58,6 +93,7 @@ export type Database = {
         }
         Update: {
           created_at?: string
+          custom_id?: string | null
           department?: Database["public"]["Enums"]["department"] | null
           email?: string
           id?: string
@@ -151,6 +187,10 @@ export type Database = {
         Returns: boolean
       }
       is_admin: { Args: { _user_id: string }; Returns: boolean }
+      resolve_custom_id_to_email: {
+        Args: { _custom_id: string }
+        Returns: string
+      }
     }
     Enums: {
       app_role:
@@ -162,6 +202,7 @@ export type Database = {
         | "marketing_staff"
         | "hr_head"
         | "hr_staff"
+        | "supervisor"
       department: "tech" | "marketing" | "hr"
       task_status: "todo" | "in_progress" | "done"
     }
@@ -300,6 +341,7 @@ export const Constants = {
         "marketing_staff",
         "hr_head",
         "hr_staff",
+        "supervisor",
       ],
       department: ["tech", "marketing", "hr"],
       task_status: ["todo", "in_progress", "done"],

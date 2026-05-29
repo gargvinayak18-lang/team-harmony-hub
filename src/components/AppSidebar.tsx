@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { LayoutDashboard, CheckSquare, Clock, Users, Building2, LogOut } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Clock, Users, LogOut, TrendingUp } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -11,10 +11,26 @@ import {
   SidebarMenu,
   SidebarMenuButton,
   SidebarMenuItem,
+  useSidebar,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/use-auth";
-import { DEPARTMENT_LABELS, ROLE_LABELS, canManageEmployees } from "@/lib/roles";
+import { DEPARTMENT_LABELS, ROLE_LABELS, canManageEmployees, canAssignTasks, canViewEmployeeDetails } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
+import { useState, type FormEvent } from "react";
+import { supabase } from "@/integrations/supabase/client";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { KeyRound } from "lucide-react";
+import { toast } from "sonner";
 
 const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
@@ -24,9 +40,11 @@ const items = [
 
 export function AppSidebar() {
   const navigate = useNavigate();
+  const { state } = useSidebar();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
   const { profile, roles, signOut } = useAuth();
-  const showEmployees = canManageEmployees(roles);
+  const showEmployees = canManageEmployees(roles) || canViewEmployeeDetails(roles);
+  const showInsights = canAssignTasks(roles) || canManageEmployees(roles);
 
   const handleSignOut = async () => {
     await signOut();
@@ -36,16 +54,22 @@ export function AppSidebar() {
   return (
     <Sidebar collapsible="icon">
       <SidebarHeader>
-        <div className="flex items-center gap-2 px-2 py-2">
-          <div className="h-8 w-8 rounded-md bg-primary flex items-center justify-center flex-shrink-0">
-            <Building2 className="h-4 w-4 text-primary-foreground" />
+        <div className="flex items-center gap-2.5 px-2.5 py-2">
+          <div className="flex items-center justify-center flex-shrink-0">
+            <img 
+              src="/logo.png" 
+              alt="Nexora Solutions" 
+              className="h-8 w-auto object-contain mix-blend-multiply dark:bg-white dark:mix-blend-normal dark:p-1 dark:rounded-md"
+            />
           </div>
-          <div className="flex flex-col overflow-hidden">
-            <span className="text-sm font-semibold truncate">EMS</span>
-            <span className="text-xs text-muted-foreground truncate">
-              {profile?.department ? DEPARTMENT_LABELS[profile.department] : "—"}
-            </span>
-          </div>
+          {state !== "collapsed" && (
+            <div className="flex flex-col overflow-hidden leading-tight">
+              <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">Portal</span>
+              <span className="text-[10px] text-muted-foreground truncate">
+                {profile?.department ? DEPARTMENT_LABELS[profile.department] : "—"}
+              </span>
+            </div>
+          )}
         </div>
       </SidebarHeader>
 
@@ -74,6 +98,16 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
+              {showInsights && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/insights"}>
+                    <Link to="/insights" className="flex items-center gap-2">
+                      <TrendingUp className="h-4 w-4" />
+                      <span>Insights</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -87,6 +121,7 @@ export function AppSidebar() {
               {roles.length ? roles.map((r) => ROLE_LABELS[r]).join(", ") : "No role yet"}
             </div>
           </div>
+          <ChangePasswordSelfDialog />
           <Button variant="outline" size="sm" className="w-full" onClick={handleSignOut}>
             <LogOut className="h-3.5 w-3.5 mr-2" />
             Sign out
@@ -94,5 +129,67 @@ export function AppSidebar() {
         </div>
       </SidebarFooter>
     </Sidebar>
+  );
+}
+
+function ChangePasswordSelfDialog() {
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!password) return toast.error("Please enter a new password");
+    if (password.length < 6) return toast.error("Password must be at least 6 characters");
+    setBusy(true);
+
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      toast.success("Password updated successfully!");
+      setOpen(false);
+      setPassword("");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update password");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline" size="sm" className="w-full">
+          <KeyRound className="h-3.5 w-3.5 mr-2" />
+          Change Password
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Change Password</DialogTitle>
+          <DialogDescription>
+            Update your login password.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="self-new-password">New Password</Label>
+            <Input
+              id="self-new-password"
+              type="password"
+              required
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              placeholder="Min 6 characters"
+            />
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={busy} className="w-full">
+              {busy ? "Updating…" : "Update Password"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
   );
 }

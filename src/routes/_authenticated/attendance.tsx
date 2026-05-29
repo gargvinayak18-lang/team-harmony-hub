@@ -4,6 +4,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   Table,
   TableBody,
@@ -14,7 +15,11 @@ import {
 } from "@/components/ui/table";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import { getAttendanceRecords } from "@/integrations/supabase/actions";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { canViewEmployeeDetails } from "@/lib/roles";
 
 export const Route = createFileRoute("/_authenticated/attendance")({
   component: AttendancePage,
@@ -28,19 +33,40 @@ interface AttRow {
   clock_out: string | null;
 }
 
+const isForgottenClockout = (r: AttRow | undefined) => {
+  if (!r || !r.clock_in || r.clock_out) return false;
+  const recDate = new Date(r.date + "T00:00:00");
+  const today = new Date();
+  const recDateStart = new Date(recDate.getFullYear(), recDate.getMonth(), recDate.getDate());
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  if (recDateStart < todayStart) return true;
+  if (recDateStart.getTime() === todayStart.getTime()) {
+    return today.getHours() >= 22;
+  }
+  return false;
+};
+
+const isOvertimeRecord = (r: AttRow) => {
+  if (!r.clock_out) return false;
+  const outTime = new Date(r.clock_out);
+  return outTime.getHours() >= 18;
+};
+
 function AttendancePage() {
-  const { user } = useAuth();
+  const { user, roles } = useAuth();
   const today = format(new Date(), "yyyy-MM-dd");
+  const hasAccess = canViewEmployeeDetails(roles || []);
+
+  const [filterDate, setFilterDate] = useState("");
 
   const { data: records, refetch } = useQuery({
-    queryKey: ["attendance-all"],
+    queryKey: ["attendance-all", filterDate],
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("attendance")
-        .select("*")
-        .order("date", { ascending: false })
-        .limit(200);
-      if (error) throw error;
+      const data = await getAttendanceRecords({
+        data: {
+          filterDate: filterDate || undefined,
+        },
+      });
       return data as AttRow[];
     },
   });
@@ -114,6 +140,11 @@ function AttendancePage() {
               </span>
             </div>
           </div>
+          {todayRec && isForgottenClockout(todayRec) && (
+            <Badge variant="destructive" className="bg-destructive/10 text-destructive border-none font-medium ml-2">
+              Absent (Forgot Clockout)
+            </Badge>
+          )}
           <div className="flex gap-2 ml-auto">
             <Button onClick={clockIn} disabled={!!todayRec?.clock_in}>
               Clock In
@@ -121,7 +152,7 @@ function AttendancePage() {
             <Button
               variant="secondary"
               onClick={clockOut}
-              disabled={!todayRec?.clock_in || !!todayRec?.clock_out}
+              disabled={!todayRec?.clock_in || !!todayRec?.clock_out || isForgottenClockout(todayRec)}
             >
               Clock Out
             </Button>
@@ -133,10 +164,35 @@ function AttendancePage() {
         <CardHeader>
           <CardTitle>Records</CardTitle>
           <CardDescription>
-            You see your own records; admins and department heads see their team
+            {hasAccess
+              ? "Filter and view team attendance logs by specific date"
+              : "Filter and view your personal attendance logs by specific date"}
           </CardDescription>
         </CardHeader>
-        <CardContent>
+        <CardContent className="space-y-4">
+          {/* Date Filter */}
+          <div className="flex flex-wrap items-end gap-4 p-4 rounded-lg bg-muted/20 border">
+            <div className="space-y-1.5 flex-1 min-w-[200px]">
+              <Label htmlFor="filter-date" className="text-xs font-semibold text-muted-foreground">Select Date</Label>
+              <Input
+                id="filter-date"
+                type="date"
+                value={filterDate}
+                onChange={(e) => setFilterDate(e.target.value)}
+                className="bg-background"
+              />
+            </div>
+            {filterDate && (
+              <Button
+                variant="ghost"
+                onClick={() => setFilterDate("")}
+                className="text-xs h-10 px-3 hover:bg-muted"
+              >
+                Clear Filter
+              </Button>
+            )}
+          </div>
+
           <div className="rounded-md border overflow-x-auto">
             <Table>
               <TableHeader>
@@ -146,6 +202,7 @@ function AttendancePage() {
                   <TableHead>Department</TableHead>
                   <TableHead>Clock In</TableHead>
                   <TableHead>Clock Out</TableHead>
+                  <TableHead>Status</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -162,12 +219,34 @@ function AttendancePage() {
                       <TableCell>
                         {r.clock_out ? format(new Date(r.clock_out), "p") : "—"}
                       </TableCell>
+                      <TableCell>
+                        {isForgottenClockout(r) ? (
+                          <Badge variant="destructive" className="bg-destructive/10 text-destructive border-none font-medium">
+                            Absent
+                          </Badge>
+                        ) : r.clock_out ? (
+                          <div className="flex gap-2 items-center flex-wrap">
+                            <Badge className="bg-emerald-500/10 text-emerald-600 border-none font-medium">
+                              Present
+                            </Badge>
+                            {isOvertimeRecord(r) && (
+                              <Badge className="bg-amber-500/10 text-amber-600 border-none font-medium">
+                                Overtime
+                              </Badge>
+                            )}
+                          </div>
+                        ) : (
+                          <Badge className="bg-blue-500/10 text-blue-600 border-none font-medium animate-pulse">
+                            On the clock
+                          </Badge>
+                        )}
+                      </TableCell>
                     </TableRow>
                   );
                 })}
                 {!records?.length && (
                   <TableRow>
-                    <TableCell colSpan={5} className="text-center text-sm text-muted-foreground py-8">
+                    <TableCell colSpan={6} className="text-center text-sm text-muted-foreground py-8">
                       No attendance records yet
                     </TableCell>
                   </TableRow>

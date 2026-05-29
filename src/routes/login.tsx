@@ -23,7 +23,7 @@ import {
   type AppRole,
   type Department,
 } from "@/lib/roles";
-import { Building2 } from "lucide-react";
+
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -39,14 +39,36 @@ function LoginPage() {
   }, [session, loading, navigate]);
 
   // Sign in
-  const [signInEmail, setSignInEmail] = useState("");
+  const [signInIdentifier, setSignInIdentifier] = useState("");
   const [signInPw, setSignInPw] = useState("");
 
   const handleSignIn = async (e: FormEvent) => {
     e.preventDefault();
     setBusy(true);
+
+    const inputIdentifier = signInIdentifier.trim();
+    let emailToUse = inputIdentifier;
+
+    // Try to resolve custom ID first
+    const { data: resolvedEmail, error: rpcError } = await supabase.rpc("resolve_custom_id_to_email", {
+      _custom_id: inputIdentifier,
+    });
+    
+    if (rpcError) {
+      setBusy(false);
+      return toast.error("Failed to check User ID: " + rpcError.message);
+    }
+    
+    if (resolvedEmail) {
+      emailToUse = resolvedEmail;
+    } else if (!inputIdentifier.includes("@")) {
+      // If it has no @ and couldn't be resolved, it's not a valid email either
+      setBusy(false);
+      return toast.error("No employee found with that User ID");
+    }
+
     const { error } = await supabase.auth.signInWithPassword({
-      email: signInEmail,
+      email: emailToUse,
       password: signInPw,
     });
     setBusy(false);
@@ -55,170 +77,49 @@ function LoginPage() {
     navigate({ to: "/dashboard" });
   };
 
-  // Sign up
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [pw, setPw] = useState("");
-  const [dept, setDept] = useState<Department | "">("");
-  const [role, setRole] = useState<AppRole | "">("");
-
-  const roleOptions: AppRole[] = dept ? ROLES_BY_DEPARTMENT[dept] : ALL_ROLES;
-
-  const handleSignUp = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!role) return toast.error("Pick a role");
-    if (role !== "global_admin" && !dept) return toast.error("Pick a department");
-    setBusy(true);
-    const { error } = await supabase.auth.signUp({
-      email,
-      password: pw,
-      options: {
-        emailRedirectTo: `${window.location.origin}/dashboard`,
-        data: {
-          name,
-          department: role === "global_admin" ? "" : dept,
-          role,
-        },
-      },
-    });
-    setBusy(false);
-    if (error) return toast.error(error.message);
-    toast.success("Account created — signing you in");
-    // auto sign-in
-    await supabase.auth.signInWithPassword({ email, password: pw });
-    navigate({ to: "/dashboard" });
-  };
-
   return (
     <div className="min-h-screen flex items-center justify-center bg-muted/30 px-4 py-12">
       <div className="w-full max-w-md">
-        <div className="flex items-center justify-center gap-2 mb-6">
-          <div className="h-10 w-10 rounded-lg bg-primary flex items-center justify-center">
-            <Building2 className="h-5 w-5 text-primary-foreground" />
-          </div>
-          <span className="text-xl font-semibold tracking-tight">EMS</span>
+        <div className="flex flex-col items-center justify-center mb-8">
+          <img 
+            src="/logo.png" 
+            alt="Nexora Solutions" 
+            className="h-20 w-auto object-contain mix-blend-multiply dark:bg-white dark:mix-blend-normal dark:p-2 dark:rounded-xl"
+          />
         </div>
 
         <Card>
           <CardHeader>
             <CardTitle>Employee portal</CardTitle>
-            <CardDescription>Sign in or create your account</CardDescription>
+            <CardDescription>Sign in to your account</CardDescription>
           </CardHeader>
           <CardContent>
-            <Tabs defaultValue="signin">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="signin">Sign in</TabsTrigger>
-                <TabsTrigger value="signup">Sign up</TabsTrigger>
-              </TabsList>
-
-              <TabsContent value="signin">
-                <form onSubmit={handleSignIn} className="space-y-4 mt-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="si-email">Email</Label>
-                    <Input
-                      id="si-email"
-                      type="email"
-                      required
-                      value={signInEmail}
-                      onChange={(e) => setSignInEmail(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="si-pw">Password</Label>
-                    <Input
-                      id="si-pw"
-                      type="password"
-                      required
-                      value={signInPw}
-                      onChange={(e) => setSignInPw(e.target.value)}
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={busy}>
-                    {busy ? "Signing in…" : "Sign in"}
-                  </Button>
-                </form>
-              </TabsContent>
-
-              <TabsContent value="signup">
-                <form onSubmit={handleSignUp} className="space-y-4 mt-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="su-name">Full name</Label>
-                    <Input
-                      id="su-name"
-                      required
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="su-email">Email</Label>
-                    <Input
-                      id="su-email"
-                      type="email"
-                      required
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="su-pw">Password</Label>
-                    <Input
-                      id="su-pw"
-                      type="password"
-                      required
-                      minLength={6}
-                      value={pw}
-                      onChange={(e) => setPw(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Department</Label>
-                    <Select
-                      value={dept}
-                      onValueChange={(v) => {
-                        setDept(v as Department);
-                        setRole("");
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Pick a department (skip for Global Admin)" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {(Object.keys(DEPARTMENT_LABELS) as Department[]).map((d) => (
-                          <SelectItem key={d} value={d}>
-                            {DEPARTMENT_LABELS[d]}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Role</Label>
-                    <Select value={role} onValueChange={(v) => setRole(v as AppRole)}>
-                      <SelectTrigger>
-                        <SelectValue placeholder="Pick a role" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {roleOptions.map((r) => (
-                          <SelectItem key={r} value={r}>
-                            {ROLE_LABELS[r]}
-                          </SelectItem>
-                        ))}
-                        {!dept && (
-                          <SelectItem value="global_admin">Global Admin</SelectItem>
-                        )}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <Button type="submit" className="w-full" disabled={busy}>
-                    {busy ? "Creating…" : "Create account"}
-                  </Button>
-                  <p className="text-xs text-muted-foreground text-center">
-                    In production, only Admin/HR creates employees. Open self-signup is for demo.
-                  </p>
-                </form>
-              </TabsContent>
-            </Tabs>
+            <form onSubmit={handleSignIn} className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="si-identifier">User ID or Email</Label>
+                <Input
+                  id="si-identifier"
+                  type="text"
+                  placeholder="e.g. emp_101 or name@company.com"
+                  required
+                  value={signInIdentifier}
+                  onChange={(e) => setSignInIdentifier(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="si-pw">Password</Label>
+                <Input
+                  id="si-pw"
+                  type="password"
+                  required
+                  value={signInPw}
+                  onChange={(e) => setSignInPw(e.target.value)}
+                />
+              </div>
+              <Button type="submit" className="w-full" disabled={busy}>
+                {busy ? "Signing in…" : "Sign in"}
+              </Button>
+            </form>
           </CardContent>
         </Card>
 
@@ -231,3 +132,4 @@ function LoginPage() {
     </div>
   );
 }
+

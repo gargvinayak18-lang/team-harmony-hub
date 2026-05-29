@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
+import { createTask, updateTaskDetails, deleteTask } from "@/integrations/supabase/actions";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,11 +36,12 @@ import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { toast } from "sonner";
 import { format } from "date-fns";
-import { Plus } from "lucide-react";
+import { Plus, Trash2, Pencil } from "lucide-react";
 import {
   canAssignTasks,
   canAssignTo,
   ROLE_LABELS,
+  isAdmin,
   type AppRole,
   type Department,
 } from "@/lib/roles";
@@ -191,7 +193,7 @@ function TasksPage() {
                       <TableCell className="text-sm">{assignee?.name ?? "—"}</TableCell>
                       <TableCell className="text-sm">{assigner?.name ?? "—"}</TableCell>
                       <TableCell className="text-sm">
-                        {t.due_date ? format(new Date(t.due_date), "MMM d") : "—"}
+                        {t.due_date ? format(new Date(t.due_date), "MMM d, h:mm a") : "—"}
                       </TableCell>
                       <TableCell>
                         <Badge variant={STATUS_VARIANT[t.status]}>
@@ -199,23 +201,41 @@ function TasksPage() {
                         </Badge>
                       </TableCell>
                       <TableCell className="text-right">
-                        {canUpdate ? (
-                          <Select
-                            value={t.status}
-                            onValueChange={(v) => updateStatus(t.id, v as Status)}
-                          >
-                            <SelectTrigger className="w-36 ml-auto">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="todo">To Do</SelectItem>
-                              <SelectItem value="in_progress">In Progress</SelectItem>
-                              <SelectItem value="done">Done</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                        <div className="flex items-center justify-end gap-2">
+                          {canUpdate ? (
+                            <Select
+                              value={t.status}
+                              onValueChange={(v) => updateStatus(t.id, v as Status)}
+                            >
+                              <SelectTrigger className="w-28 text-xs h-8">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="todo">To Do</SelectItem>
+                                <SelectItem value="in_progress">In Progress</SelectItem>
+                                <SelectItem value="done">Done</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          ) : (
+                            <span className="text-xs text-muted-foreground mr-2">—</span>
+                          )}
+                          {(t.assigner_id === user!.id || isAdmin(roles)) && (
+                            <>
+                              <EditTaskDialog
+                                task={t}
+                                employees={employees ?? []}
+                                myRoles={roles}
+                                myId={user!.id}
+                                onUpdated={refetch}
+                              />
+                              <DeleteTaskButton
+                                taskId={t.id}
+                                taskTitle={t.title}
+                                onDeleted={refetch}
+                              />
+                            </>
+                          )}
+                        </div>
                       </TableCell>
                     </TableRow>
                   );
@@ -257,7 +277,10 @@ function CreateTaskDialog({
   // Filter assignees by hierarchical rules (mirrors DB)
   const eligible = useMemo(
     () =>
-      employees.filter((e) => e.id !== myId && canAssignTo(myRoles, e.roles, e.department)),
+      employees.filter((e) => {
+        if (e.id === myId && !isAdmin(myRoles)) return false;
+        return canAssignTo(myRoles, e.roles, e.department);
+      }),
     [employees, myRoles, myId],
   );
 
@@ -265,22 +288,28 @@ function CreateTaskDialog({
     e.preventDefault();
     if (!assignee) return toast.error("Pick an assignee");
     setBusy(true);
-    const { error } = await supabase.from("tasks").insert({
-      title,
-      description: desc || null,
-      assignee_id: assignee,
-      assigner_id: myId,
-      due_date: due || null,
-    });
-    setBusy(false);
-    if (error) return toast.error(error.message);
-    toast.success("Task assigned");
-    setOpen(false);
-    setTitle("");
-    setDesc("");
-    setAssignee("");
-    setDue("");
-    onCreated();
+    const isoDueDate = due ? new Date(due).toISOString() : null;
+    try {
+      await createTask({
+        data: {
+          title,
+          description: desc || null,
+          assigneeId: assignee,
+          dueDate: isoDueDate,
+        },
+      });
+      toast.success("Task assigned");
+      setOpen(false);
+      setTitle("");
+      setDesc("");
+      setAssignee("");
+      setDue("");
+      onCreated();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to assign task");
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -323,8 +352,8 @@ function CreateTaskDialog({
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="t-due">Due date</Label>
-            <Input id="t-due" type="date" value={due} onChange={(e) => setDue(e.target.value)} />
+            <Label htmlFor="t-due">Due date &amp; time</Label>
+            <Input id="t-due" type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} />
           </div>
           <DialogFooter>
             <Button type="submit" disabled={busy}>
@@ -336,3 +365,200 @@ function CreateTaskDialog({
     </Dialog>
   );
 }
+
+function EditTaskDialog({
+  task,
+  employees,
+  myRoles,
+  myId,
+  onUpdated,
+}: {
+  task: TaskRow;
+  employees: EmployeeRow[];
+  myRoles: AppRole[];
+  myId: string;
+  onUpdated: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [title, setTitle] = useState(task.title);
+  const [desc, setDesc] = useState(task.description || "");
+  const [assignee, setAssignee] = useState<string>(task.assignee_id);
+  
+  // Format the existing ISO due date to local string for the datetime-local input
+  const formatForDateTimeLocal = (dateString: string | null) => {
+    if (!dateString) return "";
+    const d = new Date(dateString);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const hours = String(d.getHours()).padStart(2, "0");
+    const minutes = String(d.getMinutes()).padStart(2, "0");
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+  };
+
+  const [due, setDue] = useState<string>(formatForDateTimeLocal(task.due_date));
+  const [busy, setBusy] = useState(false);
+
+  // Filter assignees by hierarchical rules (mirrors DB)
+  const eligible = useMemo(
+    () =>
+      employees.filter((e) => {
+        if (e.id === myId && !isAdmin(myRoles)) return false;
+        return canAssignTo(myRoles, e.roles, e.department);
+      }),
+    [employees, myRoles, myId],
+  );
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!assignee) return toast.error("Pick an assignee");
+    setBusy(true);
+    const isoDueDate = due ? new Date(due).toISOString() : null;
+    try {
+      await updateTaskDetails({
+        data: {
+          taskId: task.id,
+          title,
+          description: desc || null,
+          assigneeId: assignee,
+          dueDate: isoDueDate,
+        },
+      });
+      toast.success("Task updated");
+      setOpen(false);
+      onUpdated();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update task");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-8 w-8 text-muted-foreground hover:text-foreground">
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Edit task</DialogTitle>
+          <DialogDescription>
+            Modify task details and assignee.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-2 flex flex-col text-left">
+            <Label htmlFor={`edit-title-${task.id}`}>Title</Label>
+            <Input
+              id={`edit-title-${task.id}`}
+              required
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2 flex flex-col text-left">
+            <Label htmlFor={`edit-desc-${task.id}`}>Description</Label>
+            <Textarea
+              id={`edit-desc-${task.id}`}
+              value={desc}
+              onChange={(e) => setDesc(e.target.value)}
+            />
+          </div>
+          <div className="space-y-2 flex flex-col text-left">
+            <Label>Assign to</Label>
+            <Select value={assignee} onValueChange={setAssignee}>
+              <SelectTrigger>
+                <SelectValue placeholder={eligible.length ? "Pick a person" : "No eligible assignees"} />
+              </SelectTrigger>
+              <SelectContent>
+                {eligible.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.name} — {e.roles.map((r) => ROLE_LABELS[r]).join(", ") || "no role"}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2 flex flex-col text-left">
+            <Label htmlFor={`edit-due-${task.id}`}>Due date &amp; time</Label>
+            <Input
+              id={`edit-due-${task.id}`}
+              type="datetime-local"
+              value={due}
+              onChange={(e) => setDue(e.target.value)}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={busy}>
+              {busy ? "Saving…" : "Save changes"}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function DeleteTaskButton({
+  taskId,
+  taskTitle,
+  onDeleted,
+}: {
+  taskId: string;
+  taskTitle: string;
+  onDeleted: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
+
+  const handleDelete = async () => {
+    setBusy(true);
+    try {
+      await deleteTask({
+        data: {
+          taskId,
+        },
+      });
+      toast.success("Task deleted");
+      setOpen(false);
+      onDeleted();
+    } catch (err: any) {
+      toast.error(err.message || "Failed to delete task");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-8 w-8 text-destructive hover:text-destructive hover:bg-destructive/5"
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Delete Task</DialogTitle>
+          <DialogDescription>
+            Are you sure you want to delete task "<strong>{taskTitle}</strong>"? This action cannot be undone.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>
+            Cancel
+          </Button>
+          <Button variant="destructive" onClick={handleDelete} disabled={busy}>
+            {busy ? "Deleting..." : "Delete"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
