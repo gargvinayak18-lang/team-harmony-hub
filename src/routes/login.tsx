@@ -229,12 +229,6 @@ function LoginPage() {
             </Button>
           </CardContent>
         </Card>
-
-        <p className="text-center text-xs text-muted-foreground mt-4">
-          <Link to="/" className="hover:underline">
-            ← Back
-          </Link>
-        </p>
       </div>
     </div>
   );
