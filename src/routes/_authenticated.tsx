@@ -225,6 +225,12 @@ function AuthLayout() {
     setTargetRect(null);
     const toastId = toast.loading("Logging out...");
     try {
+      if (typeof window !== 'undefined') {
+        const keysToClear = Object.keys(localStorage).filter(key => key.startsWith('demo_'));
+        for (const key of keysToClear) {
+          localStorage.removeItem(key);
+        }
+      }
       await signOut();
       toast.success("Goodbye!", { id: toastId });
       navigate({ to: "/login" });

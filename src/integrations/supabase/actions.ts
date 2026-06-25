@@ -32,7 +32,7 @@ async function getCallerContext(userId: string) {
   };
 }
 
-export const adminChangePassword = createServerFn({ method: "POST" })
+const _adminChangePassword = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { employeeId: string; password: string }) => d)
   .handler(async ({ data, context }) => {
@@ -55,7 +55,7 @@ export const adminChangePassword = createServerFn({ method: "POST" })
     return { success: true };
   });
 
-export const getEmployeeDetails = createServerFn({ method: "GET" })
+const _getEmployeeDetails = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { employeeId: string }) => d)
   .handler(async ({ data, context }) => {
@@ -91,7 +91,7 @@ export const getEmployeeDetails = createServerFn({ method: "GET" })
     return { tasks: tasksRes.data ?? [], attendance: attendanceRes.data ?? [] };
   });
 
-export const deleteEmployee = createServerFn({ method: "POST" })
+const _deleteEmployee = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { employeeId: string }) => d)
   .handler(async ({ data, context }) => {
@@ -113,7 +113,7 @@ export const deleteEmployee = createServerFn({ method: "POST" })
     return { success: true };
   });
 
-export const getAttendanceRecords = createServerFn({ method: "GET" })
+const _getAttendanceRecords = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { filterDate?: string }) => d)
   .handler(async ({ data, context }) => {
@@ -139,7 +139,7 @@ export const getAttendanceRecords = createServerFn({ method: "GET" })
     return attendanceData as any[];
   });
 
-export const createTask = createServerFn({ method: "POST" })
+const _createTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { title: string; description: string | null; assigneeId: string; dueDate: string | null }) => d)
   .handler(async ({ data, context }) => {
@@ -173,7 +173,7 @@ export const createTask = createServerFn({ method: "POST" })
     return { success: true };
   });
 
-export const updateTaskDetails = createServerFn({ method: "POST" })
+const _updateTaskDetails = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { taskId: string; title: string; description: string | null; assigneeId: string; dueDate: string | null }) => d)
   .handler(async ({ data, context }) => {
@@ -200,7 +200,7 @@ export const updateTaskDetails = createServerFn({ method: "POST" })
     return { success: true };
   });
 
-export const deleteTask = createServerFn({ method: "POST" })
+const _deleteTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { taskId: string }) => d)
   .handler(async ({ data, context }) => {
@@ -219,7 +219,7 @@ export const deleteTask = createServerFn({ method: "POST" })
     return { success: true };
   });
 
-export const getCurrentWifiSSID = createServerFn({ method: "GET" })
+const _getCurrentWifiSSID = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .handler(async () => {
     try {
@@ -262,7 +262,7 @@ export const getCurrentWifiSSID = createServerFn({ method: "GET" })
     }
   });
 
-export const getDashboardStats = createServerFn({ method: "GET" })
+const _getDashboardStats = createServerFn({ method: "GET" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { today: string }) => d)
   .handler(async ({ data, context }) => {
@@ -311,4 +311,170 @@ export const getDashboardStats = createServerFn({ method: "GET" })
     };
   });
 
+function wrapServerFn<T extends (...args: any[]) => any>(
+  serverFn: T,
+  clientHandler: any
+): T {
+  const fn = async function(arg: any) {
+    if (typeof window !== 'undefined') {
+      const { supabase } = await import("./client");
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user?.email === "demo@workdesk.local") {
+        const inputData = arg?.data !== undefined ? arg.data : arg;
+        return clientHandler(inputData);
+      }
+    }
+    return serverFn(arg);
+  };
+  
+  Object.setPrototypeOf(fn, serverFn);
+  return fn as unknown as T;
+}
 
+async function clientAdminChangePassword(data: any) {
+  return { success: true };
+}
+
+async function clientGetEmployeeDetails({ employeeId }: { employeeId: string }) {
+  const { supabase } = await import("./client");
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+  
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  const orgId = profile?.organization_id || "";
+  
+  const [tasksRes, attendanceRes] = await Promise.all([
+    supabase.from("tasks").select("*").eq("assignee_id", employeeId).eq("organization_id", orgId).order("created_at", { ascending: false }),
+    supabase.from("attendance").select("*").eq("employee_id", employeeId).eq("organization_id", orgId).order("date", { ascending: false }),
+  ]);
+  
+  return {
+    tasks: tasksRes.data ?? [],
+    attendance: attendanceRes.data ?? [],
+  };
+}
+
+async function clientDeleteEmployee({ employeeId }: { employeeId: string }) {
+  const { supabase } = await import("./client");
+  const { error } = await supabase.from("profiles").delete().eq("id", employeeId);
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+async function clientGetAttendanceRecords({ filterDate }: { filterDate?: string }) {
+  const { supabase } = await import("./client");
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+  
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  const orgId = profile?.organization_id || "";
+  
+  let query = supabase.from("attendance").select("*").eq("organization_id", orgId).order("date", { ascending: false });
+  if (filterDate) {
+    query = query.eq("date", filterDate);
+  }
+  
+  const { data } = await query;
+  return data ?? [];
+}
+
+async function clientCreateTask(data: any) {
+  const { supabase } = await import("./client");
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  
+  const { error } = await supabase.from("tasks").insert({
+    title: data.title,
+    description: data.description,
+    assignee_id: data.assigneeId,
+    assigner_id: user.id,
+    due_date: data.dueDate,
+    organization_id: profile?.organization_id || "",
+  });
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+async function clientUpdateTaskDetails(data: any) {
+  const { supabase } = await import("./client");
+  const { error } = await supabase.from("tasks").update({
+    title: data.title,
+    description: data.description,
+    assignee_id: data.assigneeId,
+    due_date: data.dueDate,
+  }).eq("id", data.taskId);
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+async function clientDeleteTask(data: any) {
+  const { supabase } = await import("./client");
+  const { error } = await supabase.from("tasks").delete().eq("id", data.taskId);
+  if (error) throw new Error(error.message);
+  return { success: true };
+}
+
+async function clientGetCurrentWifiSSID() {
+  const { supabase } = await import("./client");
+  const { data: wifis } = await supabase.from("organization_wifis").select("ssid");
+  const ssid = wifis && wifis.length > 0 ? wifis[0].ssid : "Office-WiFi";
+  return { ssid };
+}
+
+async function clientGetDashboardStats({ today }: { today: string }) {
+  const { supabase } = await import("./client");
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) throw new Error("Unauthorized");
+  
+  const { data: profile } = await supabase.from("profiles").select("*").eq("id", user.id).maybeSingle();
+  const orgId = profile?.organization_id || "";
+  
+  const [tasksRes, attRes, empRes] = await Promise.all([
+    supabase.from("tasks").select("*").eq("organization_id", orgId),
+    supabase
+      .from("attendance")
+      .select("id,clock_in,clock_out,attendance_type,clock_in_wifi_ssid")
+      .eq("employee_id", user.id)
+      .eq("date", today)
+      .eq("organization_id", orgId)
+      .maybeSingle(),
+    supabase.from("profiles").select("id").eq("organization_id", orgId),
+  ]);
+
+  let leaves: any[] = [];
+  try {
+    const { data: leavesData } = await supabase
+      .from("leave_requests")
+      .select("id, start_date, end_date")
+      .eq("status", "approved")
+      .eq("organization_id", orgId);
+    leaves = leavesData || [];
+  } catch (err) {
+    console.error("Leave requests query failed:", err);
+  }
+
+  const tasks = tasksRes.data || [];
+  const my = tasks.filter((t: any) => t.assignee_id === user.id);
+  const onLeaveTodayCount = leaves.filter((l: any) => l.start_date <= today && l.end_date >= today).length;
+
+  return {
+    total: tasks.length,
+    myOpen: my.filter((t: any) => t.status !== "done").length,
+    myDone: my.filter((t: any) => t.status === "done").length,
+    attendance: attRes.data,
+    employees: empRes.data?.length ?? 0,
+    rawTasks: tasks,
+    onLeaveTodayCount,
+  };
+}
+
+export const adminChangePassword = wrapServerFn(_adminChangePassword, clientAdminChangePassword);
+export const getEmployeeDetails = wrapServerFn(_getEmployeeDetails, clientGetEmployeeDetails);
+export const deleteEmployee = wrapServerFn(_deleteEmployee, clientDeleteEmployee);
+export const getAttendanceRecords = wrapServerFn(_getAttendanceRecords, clientGetAttendanceRecords);
+export const createTask = wrapServerFn(_createTask, clientCreateTask);
+export const updateTaskDetails = wrapServerFn(_updateTaskDetails, clientUpdateTaskDetails);
+export const deleteTask = wrapServerFn(_deleteTask, clientDeleteTask);
+export const getCurrentWifiSSID = wrapServerFn(_getCurrentWifiSSID, clientGetCurrentWifiSSID);
+export const getDashboardStats = wrapServerFn(_getDashboardStats, clientGetDashboardStats);

@@ -122,10 +122,6 @@ function AttendancePage() {
   const todayRec = records?.find((r) => r.employee_id === user!.id && r.date === today);
 
   const clockIn = async () => {
-    if (user?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Attendance records cannot be modified.");
-      return;
-    }
     toast.loading("Scanning network & clocking in...", { id: "clock-in-page" });
     try {
       const wifiRes = await scanWifi();
@@ -155,10 +151,6 @@ function AttendancePage() {
     }
   };
   const clockOut = async () => {
-    if (user?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Attendance records cannot be modified.");
-      return;
-    }
     const { error } = await supabase
       .from("attendance")
       .update({ clock_out: new Date().toISOString() })

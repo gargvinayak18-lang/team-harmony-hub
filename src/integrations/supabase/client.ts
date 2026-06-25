@@ -27,13 +27,307 @@ function createSupabaseClient() {
   });
 }
 
+import { toast } from "sonner";
+
+function getSandboxStorage(tableName: string) {
+  if (typeof window === 'undefined') return { inserted: [], updated: {}, deleted: [] };
+  const key = `demo_${tableName}`;
+  const stored = localStorage.getItem(key);
+  if (stored) {
+    try {
+      return JSON.parse(stored);
+    } catch (e) {
+      console.error("Failed to parse sandbox storage", e);
+    }
+  }
+  return { inserted: [], updated: {}, deleted: [] };
+}
+
+function saveSandboxStorage(tableName: string, data: any) {
+  if (typeof window === 'undefined') return;
+  const key = `demo_${tableName}`;
+  localStorage.setItem(key, JSON.stringify(data));
+}
+
+const uuid = () => Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+
+async function getMatchingRecords(tableName: string, chain: any[], _supabase: any) {
+  let query = _supabase.from(tableName).select('*');
+  for (const call of chain) {
+    if (call.prop === 'eq') {
+      query = query.eq(call.args[0], call.args[1]);
+    } else if (call.prop === 'neq') {
+      query = query.neq(call.args[0], call.args[1]);
+    } else if (call.prop === 'in') {
+      query = query.in(call.args[0], call.args[1]);
+    }
+  }
+  
+  const { data, error } = await query;
+  if (error) throw error;
+  
+  const storage = getSandboxStorage(tableName);
+  let merged = [...(data || [])];
+  
+  if (storage.deleted && storage.deleted.length > 0) {
+    merged = merged.filter((item: any) => !storage.deleted.includes(item.id));
+  }
+  
+  if (storage.updated) {
+    merged = merged.map((item: any) => {
+      if (storage.updated[item.id]) {
+        return { ...item, ...storage.updated[item.id] };
+      }
+      return item;
+    });
+  }
+  
+  if (storage.inserted && storage.inserted.length > 0) {
+    const existingIds = new Set(merged.map((item: any) => item.id));
+    let filteredInserts = storage.inserted.filter((item: any) => !existingIds.has(item.id));
+    
+    for (const call of chain) {
+      if (call.prop === 'eq') {
+        const [col, val] = call.args;
+        filteredInserts = filteredInserts.filter((item: any) => item[col] === val);
+      } else if (call.prop === 'neq') {
+        const [col, val] = call.args;
+        filteredInserts = filteredInserts.filter((item: any) => item[col] !== val);
+      } else if (call.prop === 'in') {
+        const [col, arr] = call.args;
+        if (Array.isArray(arr)) {
+          filteredInserts = filteredInserts.filter((item: any) => arr.includes(item[col]));
+        }
+      }
+    }
+    merged = [...merged, ...filteredInserts];
+  }
+  
+  return merged;
+}
+
+async function handleQueryExecution(tableName: string, chain: any[], realBuilder: any, _supabase: any) {
+  const { data: { user } } = await _supabase.auth.getUser();
+  const isDemo = user?.email === "demo@workdesk.local";
+  
+  if (!isDemo) {
+    return realBuilder;
+  }
+  
+  const isSelect = chain.some(c => c.prop === 'select');
+  const insertCall = chain.find(c => c.prop === 'insert');
+  const updateCall = chain.find(c => c.prop === 'update');
+  const deleteCall = chain.some(c => c.prop === 'delete');
+  const upsertCall = chain.find(c => c.prop === 'upsert');
+  
+  if (isSelect) {
+    const dbResponse = await realBuilder;
+    if (dbResponse.error) return dbResponse;
+    
+    const storage = getSandboxStorage(tableName);
+    let data = dbResponse.data;
+    let merged: any[] = [];
+    
+    if (Array.isArray(data)) {
+      merged = [...data];
+    } else if (data) {
+      merged = [data];
+    }
+    
+    if (storage.deleted && storage.deleted.length > 0) {
+      merged = merged.filter((item: any) => !storage.deleted.includes(item.id));
+    }
+    
+    if (storage.updated) {
+      merged = merged.map((item: any) => {
+        if (storage.updated[item.id]) {
+          return { ...item, ...storage.updated[item.id] };
+        }
+        return item;
+      });
+    }
+    
+    if (storage.inserted && storage.inserted.length > 0) {
+      const existingIds = new Set(merged.map((item: any) => item.id));
+      let filteredInserts = storage.inserted.filter((item: any) => !existingIds.has(item.id));
+      
+      for (const call of chain) {
+        if (call.prop === 'eq') {
+          const [col, val] = call.args;
+          filteredInserts = filteredInserts.filter((item: any) => item[col] === val);
+        } else if (call.prop === 'neq') {
+          const [col, val] = call.args;
+          filteredInserts = filteredInserts.filter((item: any) => item[col] !== val);
+        } else if (call.prop === 'in') {
+          const [col, arr] = call.args;
+          if (Array.isArray(arr)) {
+            filteredInserts = filteredInserts.filter((item: any) => arr.includes(item[col]));
+          }
+        }
+      }
+      merged = [...merged, ...filteredInserts];
+    }
+    
+    for (const call of chain) {
+      if (call.prop === 'order') {
+        const [column, options] = call.args;
+        const ascending = options?.ascending !== false;
+        merged.sort((a, b) => {
+          const valA = a[column];
+          const valB = b[column];
+          if (valA < valB) return ascending ? -1 : 1;
+          if (valA > valB) return ascending ? 1 : -1;
+          return 0;
+        });
+      }
+    }
+    
+    const limitCall = chain.find(c => c.prop === 'limit');
+    if (limitCall) {
+      const [limitNum] = limitCall.args;
+      merged = merged.slice(0, limitNum);
+    }
+    
+    const isSingle = chain.some(c => c.prop === 'single' || c.prop === 'maybeSingle');
+    let finalData: any = merged;
+    if (isSingle) {
+      finalData = merged.length > 0 ? merged[0] : null;
+    }
+    
+    return { data: finalData, error: null };
+  }
+  
+  let resultData: any = null;
+  const storage = getSandboxStorage(tableName);
+  
+  if (insertCall) {
+    const rawData = insertCall.args[0];
+    const itemsToInsert = Array.isArray(rawData) ? rawData : [rawData];
+    const insertedItems = itemsToInsert.map((item: any) => ({
+      created_at: new Date().toISOString(),
+      ...item,
+      id: item.id || uuid(),
+    }));
+    
+    storage.inserted = [...(storage.inserted || []), ...insertedItems];
+    saveSandboxStorage(tableName, storage);
+    resultData = Array.isArray(rawData) ? insertedItems : insertedItems[0];
+    toast.success("Changes saved to demo sandbox");
+  } else if (updateCall) {
+    const updateData = updateCall.args[0];
+    const matching = await getMatchingRecords(tableName, chain, _supabase);
+    
+    for (const record of matching) {
+      const isInserted = storage.inserted.some((x: any) => x.id === record.id);
+      if (isInserted) {
+        storage.inserted = storage.inserted.map((x: any) => {
+          if (x.id === record.id) {
+            return { ...x, ...updateData };
+          }
+          return x;
+        });
+      } else {
+        storage.updated[record.id] = {
+          ...(storage.updated[record.id] || record),
+          ...updateData
+        };
+      }
+    }
+    saveSandboxStorage(tableName, storage);
+    resultData = matching.map(r => ({ ...r, ...updateData }));
+    toast.success("Changes saved to demo sandbox");
+  } else if (deleteCall) {
+    const matching = await getMatchingRecords(tableName, chain, _supabase);
+    
+    for (const record of matching) {
+      const insertedIndex = storage.inserted.findIndex((x: any) => x.id === record.id);
+      if (insertedIndex !== -1) {
+        storage.inserted.splice(insertedIndex, 1);
+      } else {
+        if (!storage.deleted.includes(record.id)) {
+          storage.deleted.push(record.id);
+        }
+        if (storage.updated[record.id]) {
+          delete storage.updated[record.id];
+        }
+      }
+    }
+    saveSandboxStorage(tableName, storage);
+    resultData = matching;
+    toast.success("Changes saved to demo sandbox");
+  } else if (upsertCall) {
+    const rawData = upsertCall.args[0];
+    const itemsToUpsert = Array.isArray(rawData) ? rawData : [rawData];
+    const upsertedItems: any[] = [];
+    
+    for (const item of itemsToUpsert) {
+      const id = item.id || uuid();
+      const updatedItem = { ...item, id };
+      upsertedItems.push(updatedItem);
+      
+      const isInserted = storage.inserted.some((x: any) => x.id === id);
+      if (isInserted) {
+        storage.inserted = storage.inserted.map((x: any) => x.id === id ? updatedItem : x);
+      } else {
+        const { data: dbItem } = await _supabase.from(tableName).select('id').eq('id', id).maybeSingle();
+        if (dbItem) {
+          storage.updated[id] = { ...(storage.updated[id] || dbItem), ...updatedItem };
+        } else {
+          storage.inserted.push(updatedItem);
+        }
+      }
+    }
+    saveSandboxStorage(tableName, storage);
+    resultData = Array.isArray(rawData) ? upsertedItems : upsertedItems[0];
+    toast.success("Changes saved to demo sandbox");
+  }
+  
+  if (typeof window !== 'undefined') {
+    if ((window as any).queryClient) {
+      setTimeout(() => {
+        (window as any).queryClient.invalidateQueries();
+      }, 0);
+    }
+  }
+  
+  return { data: resultData, error: null };
+}
+
+function createBuilderProxy(tableName: string, realBuilder: any, _supabase: any, chain: any[] = []): any {
+  return new Proxy(realBuilder, {
+    get(target, prop, receiver) {
+      if (prop === 'then') {
+        return function(resolve: any, reject: any) {
+          handleQueryExecution(tableName, chain, realBuilder, _supabase)
+            .then(resolve)
+            .catch(reject);
+        };
+      }
+      
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value === 'function') {
+        return function(...args: any[]) {
+          const nextBuilder = value.apply(target, args);
+          return createBuilderProxy(tableName, nextBuilder, _supabase, [...chain, { prop, args }]);
+        };
+      }
+      
+      return value;
+    }
+  });
+}
+
 let _supabase: ReturnType<typeof createSupabaseClient> | undefined;
 
-// Import the supabase client like this:
-// import { supabase } from "@/integrations/supabase/client";
 export const supabase = new Proxy({} as ReturnType<typeof createSupabaseClient>, {
   get(_, prop, receiver) {
     if (!_supabase) _supabase = createSupabaseClient();
+    if (prop === 'from') {
+      return function(tableName: string) {
+        const realBuilder = _supabase!.from(tableName as any);
+        return createBuilderProxy(tableName, realBuilder, _supabase);
+      };
+    }
     return Reflect.get(_supabase, prop, receiver);
   },
 });

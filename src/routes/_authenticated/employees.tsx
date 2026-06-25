@@ -287,10 +287,6 @@ function AddEmployeeDialog({ depts, roles, onChanged }: { depts: Dept[], roles: 
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (profile?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
-      return;
-    }
     if (!name || !customId || !password || !deptId || !roleId) {
       return toast.error("Please fill in name, User ID, password, department, and role");
     }
@@ -305,38 +301,62 @@ function AddEmployeeDialog({ depts, roles, onChanged }: { depts: Dept[], roles: 
     const emailToUse = email.trim() || `${sanitizedPrefix}@workdesk.local`;
 
     try {
-      const tempClient = createClient(
-        import.meta.env.VITE_SUPABASE_URL,
-        import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
-        {
-          auth: {
-            persistSession: false,
-            autoRefreshToken: false,
-            detectSessionInUrl: false,
-          },
+      let signUpData: any;
+      if (profile?.email === "demo@workdesk.local") {
+        const dummyUserId = "demo-user-" + Math.random().toString(36).substring(2, 11);
+        signUpData = {
+          user: {
+            id: dummyUserId,
+            email: emailToUse,
+          }
+        };
+        const { error: profileError } = await supabase.from("profiles").insert({
+          id: dummyUserId,
+          name,
+          email: emailToUse,
+          custom_id: customId.trim(),
+          organization_id: profile.organization_id,
+          department_id: deptId || null,
+        });
+        if (profileError) {
+          setBusy(false);
+          return toast.error(profileError.message);
         }
-      );
+      } else {
+        const tempClient = createClient(
+          import.meta.env.VITE_SUPABASE_URL,
+          import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY,
+          {
+            auth: {
+              persistSession: false,
+              autoRefreshToken: false,
+              detectSessionInUrl: false,
+            },
+          }
+        );
 
-      const { data, error: signUpError } = await tempClient.auth.signUp({
-        email: emailToUse,
-        password,
-        options: {
-          data: {
-            name,
-            custom_id: customId.trim(),
-            organization_id: profile?.organization_id,
+        const { data, error: signUpError } = await tempClient.auth.signUp({
+          email: emailToUse,
+          password,
+          options: {
+            data: {
+              name,
+              custom_id: customId.trim(),
+              organization_id: profile?.organization_id,
+            },
           },
-        },
-      });
+        });
 
-      if (signUpError) {
-        setBusy(false);
-        return toast.error(signUpError.message);
+        if (signUpError) {
+          setBusy(false);
+          return toast.error(signUpError.message);
+        }
+        signUpData = data;
       }
 
-      if (data.user?.id && profile?.organization_id) {
-        await supabase.from("profiles").update({ organization_id: profile.organization_id, department_id: deptId || null }).eq("id", data.user.id);
-        await supabase.from("user_roles").insert({ user_id: data.user.id, role_id: roleId, organization_id: profile.organization_id });
+      if (signUpData.user?.id && profile?.organization_id) {
+        await supabase.from("profiles").update({ organization_id: profile.organization_id, department_id: deptId || null }).eq("id", signUpData.user.id);
+        await supabase.from("user_roles").insert({ user_id: signUpData.user.id, role_id: roleId, organization_id: profile.organization_id });
       }
 
       toast.success("Employee added successfully!");
@@ -439,10 +459,6 @@ function EditRolesDialog({ employees, depts, sysRoles, onChanged }: { employees:
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (profile?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
-      return;
-    }
     if (!empId || !deptId || !roleId) return toast.error("Pick employee, department, and role");
     setBusy(true);
 

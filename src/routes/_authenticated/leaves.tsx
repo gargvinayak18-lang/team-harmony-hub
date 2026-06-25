@@ -149,10 +149,6 @@ function LeavesPage() {
       return;
     }
 
-    if (user?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Applying for leave is disabled.");
-      return;
-    }
     setSubmitting(true);
     try {
       const { error } = await supabase.from("leave_requests").insert({
@@ -184,10 +180,6 @@ function LeavesPage() {
 
   // Cancel/delete pending leave request
   const handleCancelLeave = async (id: string) => {
-    if (user?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Cancelling leave requests is disabled.");
-      return;
-    }
     try {
       const { error } = await supabase
         .from("leave_requests")
@@ -208,10 +200,6 @@ function LeavesPage() {
 
   // Approve or Reject handler
   const handleProcessLeave = async (id: string, status: "approved" | "rejected") => {
-    if (user?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Approving or rejecting leave requests is disabled.");
-      return;
-    }
     setActioningId(id);
     try {
       const { error } = await supabase

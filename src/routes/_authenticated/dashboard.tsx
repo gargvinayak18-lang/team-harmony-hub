@@ -117,10 +117,6 @@ function Dashboard() {
   }, [profiles]);
 
   const updateTaskStatus = async (id: string, status: "todo" | "in_progress" | "done") => {
-    if (user?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Task status modifications are disabled.");
-      return;
-    }
     const { error } = await supabase
       .from("tasks")
       .update({ status })
@@ -176,10 +172,6 @@ function Dashboard() {
   };
 
   const clockIn = async () => {
-    if (user?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Attendance records cannot be modified.");
-      return;
-    }
     toast.loading("Scanning network & clocking in...", { id: "clock-in" });
     try {
       // 1. Get current WiFi SSID
@@ -214,10 +206,6 @@ function Dashboard() {
   };
 
   const clockOut = async () => {
-    if (user?.email === "demo@workdesk.local") {
-      toast.error("Demo Mode: Attendance records cannot be modified.");
-      return;
-    }
     const { error } = await supabase
       .from("attendance")
       .update({ clock_out: new Date().toISOString() })
@@ -296,14 +284,35 @@ function Dashboard() {
         </div>
         
         {user?.email === "demo@workdesk.local" && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => window.dispatchEvent(new Event("start-tour"))}
-            className="flex items-center gap-1.5 border-primary/20 text-primary hover:bg-primary/5 cursor-pointer font-medium"
-          >
-            💡 Quick Tour
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const keysToClear = Object.keys(localStorage).filter(key => key.startsWith('demo_'));
+                for (const key of keysToClear) {
+                  localStorage.removeItem(key);
+                }
+                toast.success("Demo sandbox reset successfully");
+                if ((window as any).queryClient) {
+                  (window as any).queryClient.invalidateQueries();
+                } else {
+                  window.location.reload();
+                }
+              }}
+              className="flex items-center gap-1.5 border-destructive/20 text-destructive hover:bg-destructive/5 cursor-pointer font-medium"
+            >
+              🔄 Reset Demo Data
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => window.dispatchEvent(new Event("start-tour"))}
+              className="flex items-center gap-1.5 border-primary/20 text-primary hover:bg-primary/5 cursor-pointer font-medium"
+            >
+              💡 Quick Tour
+            </Button>
+          </div>
         )}
       </div>
 
