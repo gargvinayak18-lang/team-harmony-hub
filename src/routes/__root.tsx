@@ -63,8 +63,12 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Nexora Solutions — Employee Management System" },
+      { title: "WorkDesk — Employee Management System" },
       { name: "description", content: "Role-based employee, task, and attendance management" },
+      { property: "og:title", content: "WorkDesk — Employee Management System" },
+      { property: "og:description", content: "Role-based employee, task, and attendance management" },
+      { property: "og:image", content: "/og-image.png" },
+      { property: "og:type", content: "website" },
     ],
     links: [
       { rel: "stylesheet", href: appCss },

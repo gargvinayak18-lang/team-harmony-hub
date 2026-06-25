@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState, type FormEvent, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
-import { useAuth } from "@/hooks/use-auth";
+import { useAuth, type RoleData } from "@/hooks/use-auth";
 import { createTask, updateTaskDetails, deleteTask } from "@/integrations/supabase/actions";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,14 +37,6 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { Plus, Trash2, Pencil } from "lucide-react";
-import {
-  canAssignTasks,
-  canAssignTo,
-  ROLE_LABELS,
-  isAdmin,
-  type AppRole,
-  type Department,
-} from "@/lib/roles";
 
 export const Route = createFileRoute("/_authenticated/tasks")({
   component: TasksPage,
@@ -67,8 +59,9 @@ interface EmployeeRow {
   id: string;
   name: string;
   email: string;
-  department: Department | null;
-  roles: AppRole[];
+  department_id: string | null;
+  roles: RoleData[];
+  maxLevel: number;
 }
 
 const STATUS_LABEL: Record<Status, string> = {
@@ -83,8 +76,13 @@ const STATUS_VARIANT: Record<Status, "outline" | "secondary" | "default"> = {
 };
 
 function TasksPage() {
-  const { user, roles } = useAuth();
-  const canAssign = canAssignTasks(roles);
+  const { user, profile, roles: myRoles, isGlobalAdmin, hasPermission } = useAuth();
+  const canAssign = isGlobalAdmin || hasPermission("assign_tasks_all") || hasPermission("assign_tasks_dept");
+
+  const myMaxLevel = useMemo(() => {
+    if (myRoles.length === 0) return -1;
+    return Math.max(...myRoles.map(r => r.level));
+  }, [myRoles]);
 
   const { data: tasks, refetch } = useQuery({
     queryKey: ["tasks"],
@@ -98,24 +96,30 @@ function TasksPage() {
     },
   });
 
-  // All visible profiles (RLS allows authenticated read)
   const { data: employees } = useQuery({
-    queryKey: ["employees-with-roles"],
+    queryKey: ["employees-with-roles-dynamic"],
     queryFn: async () => {
       const [{ data: profs }, { data: rs }] = await Promise.all([
-        supabase.from("profiles").select("id,name,email,department"),
-        supabase.from("user_roles").select("user_id,role"),
+        supabase.from("profiles").select("id,name,email,department_id"),
+        supabase.from("user_roles").select("user_id, roles(id, name, level, permissions)"),
       ]);
-      const map = new Map<string, AppRole[]>();
+      const map = new Map<string, RoleData[]>();
       for (const r of rs ?? []) {
-        const arr = map.get((r as { user_id: string }).user_id) ?? [];
-        arr.push((r as { role: AppRole }).role);
-        map.set((r as { user_id: string }).user_id, arr);
+        const arr = map.get(r.user_id) ?? [];
+        if (r.roles) {
+          arr.push(r.roles as any);
+        }
+        map.set(r.user_id, arr);
       }
-      return (profs ?? []).map((p) => ({
-        ...(p as Omit<EmployeeRow, "roles">),
-        roles: map.get((p as { id: string }).id) ?? [],
-      })) as EmployeeRow[];
+      return (profs ?? []).map((p) => {
+        const pRoles = map.get(p.id) ?? [];
+        const maxLevel = pRoles.length ? Math.max(...pRoles.map(x => x.level || 0)) : -1;
+        return {
+          ...p,
+          roles: pRoles,
+          maxLevel,
+        };
+      }) as EmployeeRow[];
     },
   });
 
@@ -148,8 +152,11 @@ function TasksPage() {
         {canAssign && (
           <CreateTaskDialog
             employees={employees ?? []}
-            myRoles={roles}
             myId={user!.id}
+            isGlobalAdmin={isGlobalAdmin}
+            hasPermission={hasPermission}
+            myDeptId={profile?.department_id || null}
+            myMaxLevel={myMaxLevel}
             onCreated={refetch}
           />
         )}
@@ -179,7 +186,7 @@ function TasksPage() {
                 {(tasks ?? []).map((t) => {
                   const assignee = empMap.get(t.assignee_id);
                   const assigner = empMap.get(t.assigner_id);
-                  const canUpdate = t.assignee_id === user!.id || t.assigner_id === user!.id;
+                  const canUpdate = t.assignee_id === user!.id || t.assigner_id === user!.id || isGlobalAdmin || hasPermission("assign_tasks_all");
                   return (
                     <TableRow key={t.id}>
                       <TableCell>
@@ -219,13 +226,16 @@ function TasksPage() {
                           ) : (
                             <span className="text-xs text-muted-foreground mr-2">—</span>
                           )}
-                          {(t.assigner_id === user!.id || isAdmin(roles)) && (
+                          {(t.assigner_id === user!.id || isGlobalAdmin || hasPermission("assign_tasks_all")) && (
                             <>
                               <EditTaskDialog
                                 task={t}
                                 employees={employees ?? []}
-                                myRoles={roles}
                                 myId={user!.id}
+                                isGlobalAdmin={isGlobalAdmin}
+                                hasPermission={hasPermission}
+                                myDeptId={profile?.department_id || null}
+                                myMaxLevel={myMaxLevel}
                                 onUpdated={refetch}
                               />
                               <DeleteTaskButton
@@ -258,13 +268,19 @@ function TasksPage() {
 
 function CreateTaskDialog({
   employees,
-  myRoles,
   myId,
+  isGlobalAdmin,
+  hasPermission,
+  myDeptId,
+  myMaxLevel,
   onCreated,
 }: {
   employees: EmployeeRow[];
-  myRoles: AppRole[];
   myId: string;
+  isGlobalAdmin: boolean;
+  hasPermission: (p: string) => boolean;
+  myDeptId: string | null;
+  myMaxLevel: number;
   onCreated: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -274,15 +290,16 @@ function CreateTaskDialog({
   const [due, setDue] = useState<string>("");
   const [busy, setBusy] = useState(false);
 
-  // Filter assignees by hierarchical rules (mirrors DB)
-  const eligible = useMemo(
-    () =>
-      employees.filter((e) => {
-        if (e.id === myId && !isAdmin(myRoles)) return false;
-        return canAssignTo(myRoles, e.roles, e.department);
-      }),
-    [employees, myRoles, myId],
-  );
+  const eligible = useMemo(() => {
+    return employees.filter(e => {
+      if (e.id === myId && !isGlobalAdmin) return false;
+      if (isGlobalAdmin || hasPermission("assign_tasks_all")) return true;
+      if (hasPermission("assign_tasks_dept")) {
+        return e.department_id === myDeptId && myMaxLevel >= e.maxLevel;
+      }
+      return false;
+    });
+  }, [employees, myId, isGlobalAdmin, hasPermission, myDeptId, myMaxLevel]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -324,17 +341,17 @@ function CreateTaskDialog({
         <DialogHeader>
           <DialogTitle>Create task</DialogTitle>
           <DialogDescription>
-            Assignee list is filtered by your role — you only see people you may assign to.
+            Assignee list is filtered by your role and permissions.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-2">
-            <Label htmlFor="t-title">Title</Label>
-            <Input id="t-title" required value={title} onChange={(e) => setTitle(e.target.value)} />
+            <Label>Title</Label>
+            <Input required value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="t-desc">Description</Label>
-            <Textarea id="t-desc" value={desc} onChange={(e) => setDesc(e.target.value)} />
+            <Label>Description</Label>
+            <Textarea value={desc} onChange={(e) => setDesc(e.target.value)} />
           </div>
           <div className="space-y-2">
             <Label>Assign to</Label>
@@ -345,15 +362,15 @@ function CreateTaskDialog({
               <SelectContent>
                 {eligible.map((e) => (
                   <SelectItem key={e.id} value={e.id}>
-                    {e.name} — {e.roles.map((r) => ROLE_LABELS[r]).join(", ") || "no role"}
+                    {e.name} — {e.roles.map((r) => r.name).join(", ") || "no role"}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2">
-            <Label htmlFor="t-due">Due date &amp; time</Label>
-            <Input id="t-due" type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} />
+            <Label>Due date &amp; time</Label>
+            <Input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} />
           </div>
           <DialogFooter>
             <Button type="submit" disabled={busy}>
@@ -369,14 +386,20 @@ function CreateTaskDialog({
 function EditTaskDialog({
   task,
   employees,
-  myRoles,
   myId,
+  isGlobalAdmin,
+  hasPermission,
+  myDeptId,
+  myMaxLevel,
   onUpdated,
 }: {
   task: TaskRow;
   employees: EmployeeRow[];
-  myRoles: AppRole[];
   myId: string;
+  isGlobalAdmin: boolean;
+  hasPermission: (p: string) => boolean;
+  myDeptId: string | null;
+  myMaxLevel: number;
   onUpdated: () => void;
 }) {
   const [open, setOpen] = useState(false);
@@ -384,7 +407,6 @@ function EditTaskDialog({
   const [desc, setDesc] = useState(task.description || "");
   const [assignee, setAssignee] = useState<string>(task.assignee_id);
   
-  // Format the existing ISO due date to local string for the datetime-local input
   const formatForDateTimeLocal = (dateString: string | null) => {
     if (!dateString) return "";
     const d = new Date(dateString);
@@ -399,15 +421,16 @@ function EditTaskDialog({
   const [due, setDue] = useState<string>(formatForDateTimeLocal(task.due_date));
   const [busy, setBusy] = useState(false);
 
-  // Filter assignees by hierarchical rules (mirrors DB)
-  const eligible = useMemo(
-    () =>
-      employees.filter((e) => {
-        if (e.id === myId && !isAdmin(myRoles)) return false;
-        return canAssignTo(myRoles, e.roles, e.department);
-      }),
-    [employees, myRoles, myId],
-  );
+  const eligible = useMemo(() => {
+    return employees.filter(e => {
+      if (e.id === myId && !isGlobalAdmin) return false;
+      if (isGlobalAdmin || hasPermission("assign_tasks_all")) return true;
+      if (hasPermission("assign_tasks_dept")) {
+        return e.department_id === myDeptId && myMaxLevel >= e.maxLevel;
+      }
+      return false;
+    });
+  }, [employees, myId, isGlobalAdmin, hasPermission, myDeptId, myMaxLevel]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -450,21 +473,12 @@ function EditTaskDialog({
         </DialogHeader>
         <form onSubmit={submit} className="space-y-4">
           <div className="space-y-2 flex flex-col text-left">
-            <Label htmlFor={`edit-title-${task.id}`}>Title</Label>
-            <Input
-              id={`edit-title-${task.id}`}
-              required
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-            />
+            <Label>Title</Label>
+            <Input required value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
           <div className="space-y-2 flex flex-col text-left">
-            <Label htmlFor={`edit-desc-${task.id}`}>Description</Label>
-            <Textarea
-              id={`edit-desc-${task.id}`}
-              value={desc}
-              onChange={(e) => setDesc(e.target.value)}
-            />
+            <Label>Description</Label>
+            <Textarea value={desc} onChange={(e) => setDesc(e.target.value)} />
           </div>
           <div className="space-y-2 flex flex-col text-left">
             <Label>Assign to</Label>
@@ -475,20 +489,15 @@ function EditTaskDialog({
               <SelectContent>
                 {eligible.map((e) => (
                   <SelectItem key={e.id} value={e.id}>
-                    {e.name} — {e.roles.map((r) => ROLE_LABELS[r]).join(", ") || "no role"}
+                    {e.name} — {e.roles.map((r) => r.name).join(", ") || "no role"}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="space-y-2 flex flex-col text-left">
-            <Label htmlFor={`edit-due-${task.id}`}>Due date &amp; time</Label>
-            <Input
-              id={`edit-due-${task.id}`}
-              type="datetime-local"
-              value={due}
-              onChange={(e) => setDue(e.target.value)}
-            />
+            <Label>Due date &amp; time</Label>
+            <Input type="datetime-local" value={due} onChange={(e) => setDue(e.target.value)} />
           </div>
           <DialogFooter>
             <Button type="submit" disabled={busy}>
@@ -561,4 +570,3 @@ function DeleteTaskButton({
     </Dialog>
   );
 }
-

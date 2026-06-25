@@ -14,6 +14,52 @@ export type Database = {
   }
   public: {
     Tables: {
+      organizations: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+        }
+        Relationships: []
+      }
+      organization_wifis: {
+        Row: {
+          id: string
+          organization_id: string
+          ssid: string
+          created_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          ssid: string
+          created_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          ssid?: string
+          created_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_wifis_organization_id_fkey"
+            columns: ["organization_id"]
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
       attendance: {
         Row: {
           clock_in: string | null
@@ -22,6 +68,9 @@ export type Database = {
           date: string
           employee_id: string
           id: string
+          organization_id: string
+          attendance_type: string
+          clock_in_wifi_ssid: string | null
         }
         Insert: {
           clock_in?: string | null
@@ -30,6 +79,9 @@ export type Database = {
           date?: string
           employee_id: string
           id?: string
+          organization_id: string
+          attendance_type?: string
+          clock_in_wifi_ssid?: string | null
         }
         Update: {
           clock_in?: string | null
@@ -38,6 +90,9 @@ export type Database = {
           date?: string
           employee_id?: string
           id?: string
+          organization_id?: string
+          attendance_type?: string
+          clock_in_wifi_ssid?: string | null
         }
         Relationships: []
       }
@@ -51,6 +106,7 @@ export type Database = {
           period_start: string
           period_type: string
           updated_at: string
+          organization_id: string
         }
         Insert: {
           content: string
@@ -61,6 +117,7 @@ export type Database = {
           period_start: string
           period_type: string
           updated_at?: string
+          organization_id: string
         }
         Update: {
           content?: string
@@ -71,6 +128,61 @@ export type Database = {
           period_start?: string
           period_type?: string
           updated_at?: string
+          organization_id?: string
+        }
+        Relationships: []
+      }
+      departments: {
+        Row: {
+          created_at: string
+          id: string
+          name: string
+          organization_id: string
+          attendance_rules: Json
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          name: string
+          organization_id: string
+          attendance_rules?: Json
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          name?: string
+          organization_id?: string
+          attendance_rules?: Json
+        }
+        Relationships: []
+      }
+      roles: {
+        Row: {
+          created_at: string
+          id: string
+          level: number
+          name: string
+          permissions: Json
+          organization_id: string
+          department_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          level?: number
+          name: string
+          permissions?: Json
+          organization_id: string
+          department_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          level?: number
+          name?: string
+          permissions?: Json
+          organization_id?: string
+          department_id?: string
         }
         Relationships: []
       }
@@ -78,28 +190,44 @@ export type Database = {
         Row: {
           created_at: string
           custom_id: string | null
-          department: Database["public"]["Enums"]["department"] | null
+          department_id: string | null
           email: string
           id: string
           name: string
+          organization_id: string | null
         }
         Insert: {
           created_at?: string
           custom_id?: string | null
-          department?: Database["public"]["Enums"]["department"] | null
+          department_id?: string | null
           email: string
           id: string
           name: string
+          organization_id?: string | null
         }
         Update: {
           created_at?: string
           custom_id?: string | null
-          department?: Database["public"]["Enums"]["department"] | null
+          department_id?: string | null
           email?: string
           id?: string
           name?: string
+          organization_id?: string | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "profiles_department_id_fkey"
+            columns: ["department_id"]
+            referencedRelation: "departments"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "profiles_organization_id_fkey"
+            columns: ["organization_id"]
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          }
+        ]
       }
       tasks: {
         Row: {
@@ -112,6 +240,7 @@ export type Database = {
           status: Database["public"]["Enums"]["task_status"]
           title: string
           updated_at: string
+          organization_id: string
         }
         Insert: {
           assignee_id: string
@@ -123,6 +252,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["task_status"]
           title: string
           updated_at?: string
+          organization_id: string
         }
         Update: {
           assignee_id?: string
@@ -134,6 +264,7 @@ export type Database = {
           status?: Database["public"]["Enums"]["task_status"]
           title?: string
           updated_at?: string
+          organization_id?: string
         }
         Relationships: []
       }
@@ -141,28 +272,145 @@ export type Database = {
         Row: {
           created_at: string
           id: string
-          role: Database["public"]["Enums"]["app_role"]
+          role_id: string
+          is_global_admin: boolean
           user_id: string
+          organization_id: string
         }
         Insert: {
           created_at?: string
           id?: string
-          role: Database["public"]["Enums"]["app_role"]
+          role_id?: string
+          is_global_admin?: boolean
           user_id: string
+          organization_id: string
         }
         Update: {
           created_at?: string
           id?: string
-          role?: Database["public"]["Enums"]["app_role"]
+          role_id?: string
+          is_global_admin?: boolean
           user_id?: string
+          organization_id?: string
         }
         Relationships: []
+      }
+      leave_categories: {
+        Row: {
+          id: string
+          organization_id: string
+          name: string
+          description: string | null
+          max_days: number | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          name: string
+          description?: string | null
+          max_days?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          name?: string
+          description?: string | null
+          max_days?: number | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_categories_organization_id_fkey"
+            columns: ["organization_id"]
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          }
+        ]
+      }
+      leave_requests: {
+        Row: {
+          id: string
+          organization_id: string
+          employee_id: string
+          category_id: string
+          start_date: string
+          end_date: string
+          reason: string | null
+          status: string
+          approved_by: string | null
+          approved_at: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          organization_id: string
+          employee_id: string
+          category_id: string
+          start_date: string
+          end_date: string
+          reason?: string | null
+          status?: string
+          approved_by?: string | null
+          approved_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          organization_id?: string
+          employee_id?: string
+          category_id?: string
+          start_date?: string
+          end_date?: string
+          reason?: string | null
+          status?: string
+          approved_by?: string | null
+          approved_at?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "leave_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_requests_employee_id_fkey"
+            columns: ["employee_id"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_requests_category_id_fkey"
+            columns: ["category_id"]
+            referencedRelation: "leave_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "leave_requests_approved_by_fkey"
+            columns: ["approved_by"]
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          }
+        ]
       }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
+      create_organization: {
+        Args: { _name: string }
+        Returns: string
+      }
       can_assign: {
         Args: { _assignee: string; _assigner: string }
         Returns: boolean
@@ -178,6 +426,10 @@ export type Database = {
       get_roles: {
         Args: { _user_id: string }
         Returns: Database["public"]["Enums"]["app_role"][]
+      }
+      get_user_organization: {
+        Args: { _user_id: string }
+        Returns: string
       }
       has_role: {
         Args: {

@@ -1,20 +1,32 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { supabase } from "@/integrations/supabase/client";
-import type { AppRole, Department } from "@/lib/roles";
+
+export interface RoleData {
+  id: string;
+  name: string;
+  level: number;
+  permissions: string[];
+}
 
 export interface Profile {
   id: string;
   name: string;
   email: string;
-  department: Department | null;
+  department_id: string | null;
+  department_name?: string | null;
+  organization_id: string | null;
+  organization_name?: string | null;
 }
 
 interface AuthState {
   user: User | null;
   session: Session | null;
   profile: Profile | null;
-  roles: AppRole[];
+  isGlobalAdmin: boolean;
+  roles: RoleData[];
+  permissions: string[];
+  hasPermission: (perm: string) => boolean;
   loading: boolean;
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
@@ -25,16 +37,69 @@ const AuthContext = createContext<AuthState | undefined>(undefined);
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [roles, setRoles] = useState<AppRole[]>([]);
+  const [roles, setRoles] = useState<RoleData[]>([]);
+  const [permissions, setPermissions] = useState<string[]>([]);
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const loadUserData = async (userId: string) => {
-    const [{ data: p }, { data: r }] = await Promise.all([
-      supabase.from("profiles").select("id,name,email,department").eq("id", userId).maybeSingle(),
-      supabase.from("user_roles").select("role").eq("user_id", userId),
+    const [{ data: pData }, { data: rData }] = await Promise.all([
+      supabase
+        .from("profiles")
+        .select("id,name,email,department_id, departments(name), organization_id, organizations(name)")
+        .eq("id", userId)
+        .maybeSingle(),
+      supabase
+        .from("user_roles")
+        .select("is_global_admin, roles(id, name, level, permissions)")
+        .eq("user_id", userId),
     ]);
-    setProfile((p as Profile | null) ?? null);
-    setRoles(((r ?? []) as { role: AppRole }[]).map((x) => x.role));
+    
+    let profileData: Profile | null = null;
+    if (pData) {
+      const anyP = pData as any;
+      profileData = {
+        id: anyP.id,
+        name: anyP.name,
+        email: anyP.email,
+        department_id: anyP.department_id,
+        department_name: anyP.departments?.name ?? null,
+        organization_id: anyP.organization_id,
+        organization_name: anyP.organizations?.name ?? null,
+      };
+    }
+
+    setProfile(profileData);
+
+    let globalAdmin = false;
+    const loadedRoles: RoleData[] = [];
+    const perms = new Set<string>();
+
+    if (rData) {
+      for (const row of rData) {
+        if (row.is_global_admin) globalAdmin = true;
+        if (row.roles) {
+          const r = row.roles as any;
+          const rolePerms = Array.isArray(r.permissions) ? r.permissions : [];
+          loadedRoles.push({
+            id: r.id,
+            name: r.name,
+            level: r.level || 0,
+            permissions: rolePerms,
+          });
+          for (const p of rolePerms) perms.add(p);
+        }
+      }
+    }
+
+    setIsGlobalAdmin(globalAdmin);
+    setRoles(loadedRoles);
+    setPermissions(Array.from(perms));
+  };
+
+  const hasPermission = (perm: string) => {
+    if (isGlobalAdmin) return true;
+    return permissions.includes(perm);
   };
 
   useEffect(() => {
@@ -47,6 +112,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       } else {
         setProfile(null);
         setRoles([]);
+        setPermissions([]);
+        setIsGlobalAdmin(false);
       }
     });
 
@@ -77,6 +144,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         session,
         profile,
         roles,
+        permissions,
+        isGlobalAdmin,
+        hasPermission,
         loading,
         refresh,
         signOut,

@@ -1,17 +1,16 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useMemo } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { CheckSquare, Clock, Users, ListTodo, AlertCircle, Calendar, User, Search, Eye } from "lucide-react";
-import { ROLE_LABELS, DEPARTMENT_LABELS, canAssignTasks, canViewEmployeeDetails } from "@/lib/roles";
+import { CheckSquare, Clock, Users, ListTodo, AlertCircle, Calendar, User, Search, Eye, Wifi, Home } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { format } from "date-fns";
 import { Input } from "@/components/ui/input";
-import { getEmployeeDetails } from "@/integrations/supabase/actions";
+import { getEmployeeDetails, getCurrentWifiSSID, getDashboardStats } from "@/integrations/supabase/actions";
 import {
   Dialog,
   DialogContent,
@@ -52,7 +51,8 @@ interface TaskRow {
 }
 
 function Dashboard() {
-  const { user, profile, roles } = useAuth();
+  const { user, profile, roles, isGlobalAdmin, hasPermission } = useAuth();
+  const navigate = useNavigate();
   const today = format(new Date(), "yyyy-MM-dd");
 
   const isTodayForgottenClockout = (clockIn: string | null, clockOut: string | null) => {
@@ -70,31 +70,25 @@ function Dashboard() {
   const [selectedEmployee, setSelectedEmployee] = useState<any | null>(null);
 
   const { data: stats, refetch } = useQuery({
-    queryKey: ["dashboard", user?.id],
+    queryKey: ["dashboard", user?.id, today],
     enabled: !!user,
-    queryFn: async () => {
-      const [tasksRes, attRes, empRes] = await Promise.all([
-        supabase.from("tasks").select("*"),
-        supabase
-          .from("attendance")
-          .select("id,clock_in,clock_out")
-          .eq("employee_id", user!.id)
-          .eq("date", today)
-          .maybeSingle(),
-        supabase.from("profiles").select("id", { count: "exact", head: true }),
-      ]);
-      const tasks = (tasksRes.data ?? []) as TaskRow[];
-      const my = tasks.filter((t) => t.assignee_id === user!.id);
-      return {
-        total: tasks.length,
-        myOpen: my.filter((t) => t.status !== "done").length,
-        myDone: my.filter((t) => t.status === "done").length,
-        attendance: attRes.data,
-        employees: empRes.count ?? 0,
-        rawTasks: tasks,
-      };
-    },
+    queryFn: () => getDashboardStats({ data: { today } }),
   });
+  const { data: wifisData } = useQuery({
+    queryKey: ["org-wifis", profile?.organization_id],
+    enabled: !!profile?.organization_id,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("organization_wifis")
+        .select("ssid")
+        .eq("organization_id", profile!.organization_id!);
+      if (error) throw error;
+      return data ?? [];
+    }
+  });
+
+  const officeWifiList = useMemo(() => wifisData?.map(w => w.ssid) || [], [wifisData]);
+
 
   // Query profiles for employee name mapping
   const { data: profiles, error: profilesError, isLoading: isProfilesLoading } = useQuery({
@@ -102,7 +96,7 @@ function Dashboard() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("profiles")
-        .select("id,name,email,department,custom_id");
+        .select("id,name,email,department_id,custom_id,departments(name)");
       if (error) {
         console.error("Error loading profiles list:", error);
         toast.error("Failed to load profiles: " + error.message);
@@ -176,21 +170,36 @@ function Dashboard() {
   };
 
   const clockIn = async () => {
-    const { error } = await supabase
-      .from("attendance")
-      .upsert(
-        {
-          employee_id: user!.id,
-          date: today,
-          clock_in: new Date().toISOString(),
-        },
-        { onConflict: "employee_id,date" }
-      );
-    if (error) {
-      toast.error(error.message);
-    } else {
-      toast.success("Clocked in");
+    toast.loading("Scanning network & clocking in...", { id: "clock-in" });
+    try {
+      // 1. Get current WiFi SSID
+      const res = await getCurrentWifiSSID();
+      const detectedSSID = res.ssid || "Unknown Network";
+      
+      // 2. Evaluate connection type
+      const isOfficeWiFi = officeWifiList.includes(detectedSSID) || (officeWifiList.length === 0 && detectedSSID === "Office-WiFi");
+      const attType = isOfficeWiFi ? "on_site" : "work_from_home";
+
+      // 3. Upsert attendance record
+      const { error } = await supabase
+        .from("attendance")
+        .upsert(
+          {
+            employee_id: user!.id,
+            date: today,
+            clock_in: new Date().toISOString(),
+            organization_id: profile!.organization_id!,
+            attendance_type: attType,
+            clock_in_wifi_ssid: detectedSSID,
+          },
+          { onConflict: "employee_id,date" }
+        );
+
+      if (error) throw error;
+      toast.success(`Clocked in (${isOfficeWiFi ? "On Site" : "WFH"} via ${detectedSSID})`, { id: "clock-in" });
       refetch();
+    } catch (err: any) {
+      toast.error("Failed to clock in: " + err.message, { id: "clock-in" });
     }
   };
 
@@ -234,7 +243,7 @@ function Dashboard() {
       const name = (p.name || "").toLowerCase();
       const email = (p.email || "").toLowerCase();
       const customId = (p.custom_id || "").toLowerCase();
-      const label = p.department ? (DEPARTMENT_LABELS[p.department as keyof typeof DEPARTMENT_LABELS] || "").toLowerCase() : "";
+      const label = (p.departments?.name || "").toLowerCase();
       return (
         name.includes(query) ||
         email.includes(query) ||
@@ -245,6 +254,7 @@ function Dashboard() {
   }, [profiles, employeeSearch]);
 
   const att = stats?.attendance;
+  console.log("Dashboard state:", { userId: user?.id, today, att });
 
   return (
     <div className="space-y-6 max-w-7xl">
@@ -253,19 +263,22 @@ function Dashboard() {
           Welcome{profile?.name ? `, ${profile.name.split(" ")[0]}` : ""}
         </h1>
         <div className="flex flex-wrap gap-2 mt-2">
-          {profile?.department && (
-            <Badge variant="secondary">{DEPARTMENT_LABELS[profile.department as keyof typeof DEPARTMENT_LABELS] || profile.department}</Badge>
+          {profile?.department_name && (
+            <Badge variant="secondary">{profile.department_name}</Badge>
           )}
           {roles.map((r) => (
-            <Badge key={r}>{ROLE_LABELS[r] || r}</Badge>
+            <Badge key={r.id}>{r.name}</Badge>
           ))}
-          {!roles.length && (
+          {!roles.length && !isGlobalAdmin && (
             <Badge variant="outline">No role assigned — ask your admin</Badge>
+          )}
+          {isGlobalAdmin && (
+            <Badge variant="outline" className="border-primary/50 text-primary bg-primary/5">Global Admin</Badge>
           )}
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <StatCard
           icon={ListTodo}
           label="My open tasks"
@@ -285,12 +298,26 @@ function Dashboard() {
           onClick={() => setShowEmployeesModal(true)}
         />
         <StatCard
+          icon={Calendar}
+          label="On leave today"
+          value={stats?.onLeaveTodayCount ?? 0}
+          onClick={() => navigate({ to: "/leaves" })}
+        />
+        <StatCard
           icon={Clock}
           label="Today"
           value={
             att?.clock_in ? (
-              isTodayForgottenClockout(att.clock_in, att.clock_out) ? "Absent" : att.clock_out ? "Done" : "On the clock"
-            ) : "Not started"
+              isTodayForgottenClockout(att.clock_in, att.clock_out) ? (
+                "Absent"
+              ) : att.clock_out ? (
+                `Done (${(att as any).attendance_type === "work_from_home" ? "WFH" : "On Site"})`
+              ) : (
+                `On the clock (${(att as any).attendance_type === "work_from_home" ? "WFH" : "On Site"})`
+              )
+            ) : (
+              "Not started"
+            )
           }
         />
       </div>
@@ -315,6 +342,25 @@ function Dashboard() {
               </span>
             </div>
           </div>
+          {att?.clock_in && !isTodayForgottenClockout(att.clock_in, att.clock_out) && (
+            <div className="flex items-center gap-2 text-xs border p-2 rounded-lg bg-muted/10">
+              {(att as any).attendance_type === "work_from_home" ? (
+                <>
+                  <Home className="h-4 w-4 text-indigo-500 animate-bounce" />
+                  <span className="font-medium text-indigo-700 dark:text-indigo-400">
+                    Work From Home <span className="text-muted-foreground font-normal">(via {(att as any).clock_in_wifi_ssid || "Remote WiFi"})</span>
+                  </span>
+                </>
+              ) : (
+                <>
+                  <Wifi className="h-4 w-4 text-emerald-500" />
+                  <span className="font-medium text-emerald-700 dark:text-emerald-400">
+                    On Site <span className="text-muted-foreground font-normal">(via {(att as any).clock_in_wifi_ssid || "Office WiFi"})</span>
+                  </span>
+                </>
+              )}
+            </div>
+          )}
           {att?.clock_in && isTodayForgottenClockout(att.clock_in, att.clock_out) && (
             <Badge variant="destructive" className="bg-destructive/10 text-destructive border-none font-medium ml-2">
               Absent (Forgot Clockout)
@@ -454,7 +500,7 @@ function Dashboard() {
         </div>
       </div>
 
-      {canAssignTasks(roles) && (
+          {isGlobalAdmin || hasPermission("assign_tasks_all") || hasPermission("assign_tasks_dept") ? (
         <Card>
           <CardHeader>
             <CardTitle>Quick actions</CardTitle>
@@ -466,7 +512,7 @@ function Dashboard() {
             </p>
           </CardContent>
         </Card>
-      )}
+      ) : null}
 
       {/* Task Details Dialog */}
       <Dialog open={!!selectedTask} onOpenChange={(open) => !open && setSelectedTask(null)}>
@@ -642,12 +688,12 @@ function Dashboard() {
                           {p.custom_id}
                         </Badge>
                       )}
-                      {p.department && (
+                      {p.departments?.name && (
                         <Badge variant="secondary" className="capitalize text-[10px]">
-                          {DEPARTMENT_LABELS[p.department as keyof typeof DEPARTMENT_LABELS] || p.department}
+                          {p.departments.name}
                         </Badge>
                       )}
-                      {canViewEmployeeDetails(roles) && (
+                      {(isGlobalAdmin || hasPermission("view_attendance_all") || hasPermission("manage_employees")) && (
                         <Button
                           variant="ghost"
                           size="sm"
@@ -830,9 +876,9 @@ function EmployeeStatusDialog({
             <Badge variant="secondary" className="text-[10px]">
               Status Inspection
             </Badge>
-            {employee.department && (
+            {employee.departments?.name && (
               <Badge variant="outline" className="capitalize text-[10px]">
-                {DEPARTMENT_LABELS[employee.department as keyof typeof DEPARTMENT_LABELS] || employee.department}
+                {employee.departments.name}
               </Badge>
             )}
           </div>

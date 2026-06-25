@@ -1,5 +1,5 @@
 import { Link, useRouterState, useNavigate } from "@tanstack/react-router";
-import { LayoutDashboard, CheckSquare, Clock, Users, LogOut, TrendingUp } from "lucide-react";
+import { LayoutDashboard, CheckSquare, Clock, Users, LogOut, TrendingUp, Settings, CalendarDays } from "lucide-react";
 import {
   Sidebar,
   SidebarContent,
@@ -14,7 +14,6 @@ import {
   useSidebar,
 } from "@/components/ui/sidebar";
 import { useAuth } from "@/hooks/use-auth";
-import { DEPARTMENT_LABELS, ROLE_LABELS, canManageEmployees, canAssignTasks, canViewEmployeeDetails } from "@/lib/roles";
 import { Button } from "@/components/ui/button";
 import { useState, type FormEvent } from "react";
 import { supabase } from "@/integrations/supabase/client";
@@ -36,15 +35,18 @@ const items = [
   { title: "Dashboard", url: "/dashboard", icon: LayoutDashboard },
   { title: "Tasks", url: "/tasks", icon: CheckSquare },
   { title: "Attendance", url: "/attendance", icon: Clock },
+  { title: "Leaves", url: "/leaves", icon: CalendarDays },
 ];
 
 export function AppSidebar() {
   const navigate = useNavigate();
   const { state } = useSidebar();
   const pathname = useRouterState({ select: (r) => r.location.pathname });
-  const { profile, roles, signOut } = useAuth();
-  const showEmployees = canManageEmployees(roles) || canViewEmployeeDetails(roles);
-  const showInsights = canAssignTasks(roles) || canManageEmployees(roles);
+  const { profile, roles, hasPermission, signOut } = useAuth();
+  
+  const showEmployees = hasPermission("manage_employees") || hasPermission("view_attendance_all");
+  const showInsights = hasPermission("assign_tasks_all") || hasPermission("manage_employees");
+  const showSettings = hasPermission("manage_organization");
 
   const handleSignOut = async () => {
     await signOut();
@@ -58,15 +60,15 @@ export function AppSidebar() {
           <div className="flex items-center justify-center flex-shrink-0">
             <img 
               src="/logo.png" 
-              alt="Nexora Solutions" 
+              alt="WorkDesk" 
               className="h-8 w-auto object-contain mix-blend-multiply dark:bg-white dark:mix-blend-normal dark:p-1 dark:rounded-md"
             />
           </div>
           {state !== "collapsed" && (
             <div className="flex flex-col overflow-hidden leading-tight">
-              <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">Portal</span>
+              <span className="text-xs font-semibold tracking-wider text-muted-foreground uppercase">{profile?.organization_name || "Organization"}</span>
               <span className="text-[10px] text-muted-foreground truncate">
-                {profile?.department ? DEPARTMENT_LABELS[profile.department] : "—"}
+                {profile?.department_name || "—"}
               </span>
             </div>
           )}
@@ -108,6 +110,16 @@ export function AppSidebar() {
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               )}
+              {showSettings && (
+                <SidebarMenuItem>
+                  <SidebarMenuButton asChild isActive={pathname === "/organization-settings"}>
+                    <Link to="/organization-settings" className="flex items-center gap-2">
+                      <Settings className="h-4 w-4" />
+                      <span>Settings</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
@@ -118,7 +130,7 @@ export function AppSidebar() {
           <div className="text-xs">
             <div className="font-medium truncate">{profile?.name ?? "—"}</div>
             <div className="text-muted-foreground truncate">
-              {roles.length ? roles.map((r) => ROLE_LABELS[r]).join(", ") : "No role yet"}
+              {roles.length ? roles.map((r) => r.name).join(", ") : "No role yet"}
             </div>
           </div>
           <ChangePasswordSelfDialog />
