@@ -153,6 +153,10 @@ function OrganizationSettings() {
 
   const handleCreateDept = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     if (!newDeptName.trim() || !profile?.organization_id) return;
 
     const { error } = await supabase.from("departments").insert({
@@ -170,6 +174,10 @@ function OrganizationSettings() {
   };
 
   const handleDeleteDept = async (id: string) => {
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     const { error } = await supabase.from("departments").delete().eq("id", id);
     if (error) toast.error(error.message);
     else { toast.success("Department deleted"); loadData(); }
@@ -177,6 +185,10 @@ function OrganizationSettings() {
 
   const handleCreateRole = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     if (!newRoleName.trim() || !newRoleDeptId) {
       return toast.error("Role Name and Department are required");
     }
@@ -204,6 +216,10 @@ function OrganizationSettings() {
   };
 
   const handleDeleteRole = async (id: string) => {
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     const { error } = await supabase.from("roles").delete().eq("id", id);
     if (error) toast.error(error.message);
     else { toast.success("Role deleted"); loadData(); }
@@ -215,6 +231,10 @@ function OrganizationSettings() {
 
   const handleCreateCategory = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     if (!newCatName.trim() || !profile?.organization_id) return;
 
     const { error } = await supabase.from("leave_categories").insert({
@@ -236,6 +256,10 @@ function OrganizationSettings() {
   };
 
   const handleDeleteCategory = async (id: string) => {
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     const { error } = await supabase.from("leave_categories").delete().eq("id", id);
     if (error) {
       toast.error(error.message);
@@ -247,6 +271,10 @@ function OrganizationSettings() {
 
   const handleUpdateOrgName = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     if (!orgName.trim() || !profile?.organization_id) return;
     setSavingOrg(true);
     const { error } = await supabase
@@ -266,6 +294,10 @@ function OrganizationSettings() {
 
   const handleCreateWifi = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     if (!newWifiSSID.trim() || !profile?.organization_id) return;
     setSavingWifi(true);
     const { error } = await supabase.from("organization_wifis").insert({
@@ -283,6 +315,10 @@ function OrganizationSettings() {
   };
 
   const handleDeleteWifi = async (id: string) => {
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     const { error } = await supabase.from("organization_wifis").delete().eq("id", id);
     if (error) {
       toast.error(error.message);
@@ -297,7 +333,7 @@ function OrganizationSettings() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6">
+    <div id="tour-settings-page" className="max-w-5xl mx-auto space-y-6">
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Organization Settings</h1>
         <p className="text-muted-foreground mt-2">Manage custom departments, roles, and permissions.</p>

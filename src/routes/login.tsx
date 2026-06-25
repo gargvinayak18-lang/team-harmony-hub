@@ -95,7 +95,26 @@ function LoginPage() {
     setBusy(false);
     if (error) return toast.error(error.message);
     toast.success("Account created! Please check your email to verify your account.");
-    // Supabase will send a verification email. The user must verify before they can log in.
+  };
+
+  const handleDemoLogin = async () => {
+    setBusy(true);
+    const toastId = toast.loading("Logging into Demo Organization...");
+    try {
+      const { error } = await supabase.auth.signInWithPassword({
+        email: "demo@workdesk.local",
+        password: "demo123",
+      });
+      if (error) throw error;
+      
+      localStorage.setItem("show_demo_mode", "true");
+      toast.success("Welcome to Demo Mode!", { id: toastId });
+      navigate({ to: "/dashboard" });
+    } catch (err: any) {
+      toast.error("Failed to start demo: " + (err.message || err), { id: toastId });
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -189,6 +208,25 @@ function LoginPage() {
                 </form>
               </TabsContent>
             </Tabs>
+
+            <div className="relative my-6">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-border" />
+              </div>
+              <div className="relative flex justify-center text-xs uppercase">
+                <span className="bg-card px-2 text-muted-foreground">Or explore WorkDesk</span>
+              </div>
+            </div>
+
+            <Button
+              variant="outline"
+              type="button"
+              className="w-full border-primary/30 text-primary hover:bg-primary/5 hover:text-primary transition-all duration-300 font-semibold cursor-pointer"
+              onClick={handleDemoLogin}
+              disabled={busy}
+            >
+              🚀 Launch Interactive Demo
+            </Button>
           </CardContent>
         </Card>
 

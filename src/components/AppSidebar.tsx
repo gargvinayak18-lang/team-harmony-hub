@@ -54,7 +54,7 @@ export function AppSidebar() {
   };
 
   return (
-    <Sidebar collapsible="icon">
+    <Sidebar id="tour-sidebar" collapsible="icon">
       <SidebarHeader>
         <div className="flex items-center gap-2.5 px-2.5 py-2">
           <div className="flex items-center justify-center flex-shrink-0">

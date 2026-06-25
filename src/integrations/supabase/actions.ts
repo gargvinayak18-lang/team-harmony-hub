@@ -28,6 +28,7 @@ async function getCallerContext(userId: string) {
     hasPerm: (p: string) => isGlobalAdmin || permissions.has(p),
     orgId: profileRes.data?.organization_id,
     departmentId: profileRes.data?.department_id,
+    isDemoUser: profileRes.data?.email === "demo@workdesk.local",
   };
 }
 
@@ -35,7 +36,8 @@ export const adminChangePassword = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { employeeId: string; password: string }) => d)
   .handler(async ({ data, context }) => {
-    const { hasPerm, orgId } = await getCallerContext(context.userId);
+    const { hasPerm, orgId, isDemoUser } = await getCallerContext(context.userId);
+    if (isDemoUser) throw new Error("Demo Mode: Modifications are disabled for the dummy organization.");
     if (!orgId) throw new Error("Unauthorized: Organization ID is required.");
     if (!hasPerm("manage_employees") && !hasPerm("manage_organization")) {
       throw new Error("Unauthorized: Only administrators can change employee passwords.");
@@ -93,7 +95,8 @@ export const deleteEmployee = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { employeeId: string }) => d)
   .handler(async ({ data, context }) => {
-    const { hasPerm, orgId } = await getCallerContext(context.userId);
+    const { hasPerm, orgId, isDemoUser } = await getCallerContext(context.userId);
+    if (isDemoUser) throw new Error("Demo Mode: Modifications are disabled.");
     if (!orgId) throw new Error("Unauthorized: Organization ID is required.");
     if (!hasPerm("manage_organization") && !hasPerm("manage_employees")) {
       throw new Error("Unauthorized: Only administrators can delete employees.");
@@ -140,7 +143,8 @@ export const createTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { title: string; description: string | null; assigneeId: string; dueDate: string | null }) => d)
   .handler(async ({ data, context }) => {
-    const { hasPerm, orgId, departmentId } = await getCallerContext(context.userId);
+    const { hasPerm, orgId, departmentId, isDemoUser } = await getCallerContext(context.userId);
+    if (isDemoUser) throw new Error("Demo Mode: Task assignment is disabled.");
     if (!orgId) throw new Error("Unauthorized: Organization ID is required.");
 
     if (context.userId !== data.assigneeId) {
@@ -173,7 +177,8 @@ export const updateTaskDetails = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { taskId: string; title: string; description: string | null; assigneeId: string; dueDate: string | null }) => d)
   .handler(async ({ data, context }) => {
-    const { hasPerm, orgId } = await getCallerContext(context.userId);
+    const { hasPerm, orgId, isDemoUser } = await getCallerContext(context.userId);
+    if (isDemoUser) throw new Error("Demo Mode: Modifying tasks is disabled.");
     if (!orgId) throw new Error("Unauthorized: Organization ID is required.");
     const task = await supabaseAdmin.from("tasks").select("*").eq("id", data.taskId).maybeSingle();
     if (task.error || !task.data || task.data.organization_id !== orgId) throw new Error("Task not found.");
@@ -199,7 +204,8 @@ export const deleteTask = createServerFn({ method: "POST" })
   .middleware([requireSupabaseAuth])
   .inputValidator((d: { taskId: string }) => d)
   .handler(async ({ data, context }) => {
-    const { hasPerm, orgId } = await getCallerContext(context.userId);
+    const { hasPerm, orgId, isDemoUser } = await getCallerContext(context.userId);
+    if (isDemoUser) throw new Error("Demo Mode: Deleting tasks is disabled.");
     if (!orgId) throw new Error("Unauthorized: Organization ID is required.");
     const task = await supabaseAdmin.from("tasks").select("*").eq("id", data.taskId).maybeSingle();
     if (task.error || !task.data || task.data.organization_id !== orgId) throw new Error("Task not found.");

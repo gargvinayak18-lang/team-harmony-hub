@@ -125,7 +125,7 @@ function EmployeesPage() {
   if (!allowed) return null;
 
   return (
-    <div className="space-y-6 max-w-7xl">
+    <div id="tour-employees-page" className="space-y-6 max-w-7xl">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Employee directory</h1>
@@ -287,6 +287,10 @@ function AddEmployeeDialog({ depts, roles, onChanged }: { depts: Dept[], roles: 
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     if (!name || !customId || !password || !deptId || !roleId) {
       return toast.error("Please fill in name, User ID, password, department, and role");
     }
@@ -435,6 +439,10 @@ function EditRolesDialog({ employees, depts, sysRoles, onChanged }: { employees:
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (profile?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Modifications are disabled for the dummy organization.");
+      return;
+    }
     if (!empId || !deptId || !roleId) return toast.error("Pick employee, department, and role");
     setBusy(true);
 

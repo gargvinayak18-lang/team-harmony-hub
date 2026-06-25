@@ -1,6 +1,6 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -69,6 +69,8 @@ function Dashboard() {
   const [employeeSearch, setEmployeeSearch] = useState("");
   const [selectedEmployee, setSelectedEmployee] = useState<any | null>(null);
 
+
+
   const { data: stats, refetch } = useQuery({
     queryKey: ["dashboard", user?.id, today],
     enabled: !!user,
@@ -115,6 +117,10 @@ function Dashboard() {
   }, [profiles]);
 
   const updateTaskStatus = async (id: string, status: "todo" | "in_progress" | "done") => {
+    if (user?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Task status modifications are disabled.");
+      return;
+    }
     const { error } = await supabase
       .from("tasks")
       .update({ status })
@@ -170,6 +176,10 @@ function Dashboard() {
   };
 
   const clockIn = async () => {
+    if (user?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Attendance records cannot be modified.");
+      return;
+    }
     toast.loading("Scanning network & clocking in...", { id: "clock-in" });
     try {
       // 1. Get current WiFi SSID
@@ -204,6 +214,10 @@ function Dashboard() {
   };
 
   const clockOut = async () => {
+    if (user?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Attendance records cannot be modified.");
+      return;
+    }
     const { error } = await supabase
       .from("attendance")
       .update({ clock_out: new Date().toISOString() })
@@ -256,29 +270,44 @@ function Dashboard() {
   const att = stats?.attendance;
   console.log("Dashboard state:", { userId: user?.id, today, att });
 
+
+
   return (
     <div className="space-y-6 max-w-7xl">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Welcome{profile?.name ? `, ${profile.name.split(" ")[0]}` : ""}
-        </h1>
-        <div className="flex flex-wrap gap-2 mt-2">
-          {profile?.department_name && (
-            <Badge variant="secondary">{profile.department_name}</Badge>
-          )}
-          {roles.map((r) => (
-            <Badge key={r.id}>{r.name}</Badge>
-          ))}
-          {!roles.length && !isGlobalAdmin && (
-            <Badge variant="outline">No role assigned — ask your admin</Badge>
-          )}
-          {isGlobalAdmin && (
-            <Badge variant="outline" className="border-primary/50 text-primary bg-primary/5">Global Admin</Badge>
-          )}
+      <div id="tour-welcome" className="flex justify-between items-start flex-wrap gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Welcome{profile?.name ? `, ${profile.name.split(" ")[0]}` : ""}
+          </h1>
+          <div className="flex flex-wrap gap-2 mt-2">
+            {profile?.department_name && (
+              <Badge variant="secondary">{profile.department_name}</Badge>
+            )}
+            {roles.map((r) => (
+              <Badge key={r.id}>{r.name}</Badge>
+            ))}
+            {!roles.length && !isGlobalAdmin && (
+              <Badge variant="outline">No role assigned — ask your admin</Badge>
+            )}
+            {isGlobalAdmin && (
+              <Badge variant="outline" className="border-primary/50 text-primary bg-primary/5">Global Admin</Badge>
+            )}
+          </div>
         </div>
+        
+        {user?.email === "demo@workdesk.local" && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => window.dispatchEvent(new Event("start-tour"))}
+            className="flex items-center gap-1.5 border-primary/20 text-primary hover:bg-primary/5 cursor-pointer font-medium"
+          >
+            💡 Quick Tour
+          </Button>
+        )}
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
+      <div id="tour-stats" className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         <StatCard
           icon={ListTodo}
           label="My open tasks"
@@ -322,7 +351,7 @@ function Dashboard() {
         />
       </div>
 
-      <Card>
+      <Card id="tour-clockin">
         <CardHeader>
           <CardTitle>Attendance</CardTitle>
           <CardDescription>Today — {format(new Date(), "PPPP")}</CardDescription>
@@ -382,7 +411,7 @@ function Dashboard() {
       </Card>
 
       {/* Kanban Board Section */}
-      <div className="space-y-4">
+      <div id="tour-tasks" className="space-y-4">
         <div>
           <h2 className="text-lg font-semibold tracking-tight">My Tasks Board</h2>
           <p className="text-xs text-muted-foreground">Drag and drop cards to update progress status</p>

@@ -130,6 +130,10 @@ function TasksPage() {
   }, [employees]);
 
   const updateStatus = async (id: string, status: Status) => {
+    if (user?.email === "demo@workdesk.local") {
+      toast.error("Demo Mode: Task status modifications are disabled.");
+      return;
+    }
     const { error } = await supabase.from("tasks").update({ status }).eq("id", id);
     if (error) toast.error(error.message);
     else {
@@ -139,7 +143,7 @@ function TasksPage() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl">
+    <div id="tour-tasks-page" className="space-y-6 max-w-7xl">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Tasks</h1>
