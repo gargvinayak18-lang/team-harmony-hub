@@ -1,20 +1,21 @@
-import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState, type FormEvent, useEffect } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/hooks/use-auth";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "sonner";
+import { Eye, EyeOff, Sparkles } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 
 export const Route = createFileRoute("/login")({
   component: LoginPage,
@@ -24,6 +25,35 @@ function LoginPage() {
   const navigate = useNavigate();
   const { session, loading } = useAuth();
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+
+  // Forgot password dialog state
+  const [resetDialogOpen, setResetDialogOpen] = useState(false);
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+
+  const handleForgotPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!resetEmail.trim()) {
+      return toast.error("Please enter your email address");
+    }
+    setResetBusy(true);
+    const toastId = toast.loading("Sending recovery email...");
+    try {
+      const redirectToUrl = window.location.origin + "/reset-password";
+      const { error } = await supabase.auth.resetPasswordForEmail(resetEmail.trim(), {
+        redirectTo: redirectToUrl,
+      });
+      if (error) throw error;
+      toast.success("Password reset recovery email has been sent!", { id: toastId });
+      setResetDialogOpen(false);
+      setResetEmail("");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to send reset link", { id: toastId });
+    } finally {
+      setResetBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!loading && session) navigate({ to: "/dashboard" });
@@ -45,7 +75,6 @@ function LoginPage() {
     const inputIdentifier = signInIdentifier.trim();
     let emailToUse = inputIdentifier;
 
-    // Try to resolve custom ID first
     const { data: resolvedEmail, error: rpcError } = await supabase.rpc("resolve_custom_id_to_email", {
       _custom_id: inputIdentifier,
     });
@@ -58,7 +87,6 @@ function LoginPage() {
     if (resolvedEmail) {
       emailToUse = resolvedEmail;
     } else if (!inputIdentifier.includes("@")) {
-      // If it has no @ and couldn't be resolved, it's not a valid email either
       setBusy(false);
       return toast.error("No employee found with that User ID");
     }
@@ -80,6 +108,25 @@ function LoginPage() {
     if (signUpPw.length < 6) {
       setBusy(false);
       return toast.error("Password must be at least 6 characters");
+    }
+    
+    try {
+      const { data: isAuth, error: authError } = await supabase.rpc("is_email_authorized", {
+        _email: signUpEmail.trim(),
+      });
+      
+      if (authError) {
+        setBusy(false);
+        return toast.error("Authorization check failed: " + authError.message);
+      }
+      
+      if (!isAuth) {
+        setBusy(false);
+        return toast.error("This email is not authorized to sign up. Please contact your administrator.");
+      }
+    } catch (err: any) {
+      setBusy(false);
+      return toast.error("Failed to verify email authorization: " + err.message);
     }
     
     const { error } = await supabase.auth.signUp({
@@ -118,118 +165,230 @@ function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-muted/30 px-4 py-12">
-      <div className="w-full max-w-md">
-        <div className="flex flex-col items-center justify-center mb-8">
-          <img 
-            src="/logo.png" 
-            alt="WorkDesk" 
-            className="h-20 w-auto object-contain mix-blend-multiply dark:bg-white dark:mix-blend-normal dark:p-2 dark:rounded-xl"
+    <div className="min-h-screen w-full grid grid-cols-1 lg:grid-cols-12 overflow-hidden bg-slate-50 dark:bg-zinc-950">
+      {/* Left Panel: Hero Graphic with Office Image */}
+      <div className="relative col-span-5 h-full w-full hidden lg:flex flex-col justify-between p-12 text-white overflow-hidden select-none">
+        {/* Background Image */}
+        <div className="absolute inset-0 z-0">
+          <img
+            src="/office-bg.png"
+            alt="Office workspace"
+            className="object-cover w-full h-full transform scale-105"
           />
+          {/* Soft dark primary-themed overlay */}
+          <div className="absolute inset-0 bg-zinc-950/75 mix-blend-multiply" />
+          <div className="absolute inset-0 bg-gradient-to-tr from-zinc-950/95 via-primary/60 to-transparent opacity-85" />
         </div>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>Employee portal</CardTitle>
-            <CardDescription>Sign in to your account</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Tabs defaultValue="signin" className="w-full">
-              <TabsList className="grid w-full grid-cols-2 mb-6">
-                <TabsTrigger value="signin">Sign In</TabsTrigger>
-                <TabsTrigger value="signup">Sign Up</TabsTrigger>
-              </TabsList>
-              
-              <TabsContent value="signin">
-                <form onSubmit={handleSignIn} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="si-identifier">User ID or Email</Label>
-                    <Input
-                      id="si-identifier"
-                      type="text"
-                      placeholder="e.g. emp_101 or name@company.com"
-                      required
-                      value={signInIdentifier}
-                      onChange={(e) => setSignInIdentifier(e.target.value)}
-                    />
+        {/* Brand/Content - Top */}
+        <div className="relative z-10 flex flex-col pt-8">
+          <h1 className="text-4xl xl:text-5xl font-extrabold tracking-tight leading-tight max-w-md">
+            Work Smarter.<br />Sync Teams Faster.
+          </h1>
+          <p className="mt-4 text-slate-100/80 text-sm xl:text-base max-w-sm font-light leading-relaxed">
+            End-to-end task delegation, automated attendance tracking, and leave coordination — built for modern workplaces.
+          </p>
+        </div>
+
+        {/* Brand/Logo - Bottom */}
+        <div className="relative z-10 flex items-center gap-2">
+          <img
+            src="/logo.png"
+            alt="WorkDesk Logo"
+            className="h-8 w-auto object-contain brightness-0 invert"
+          />
+        </div>
+      </div>
+
+      {/* Right Panel: Content Form */}
+      <div className="col-span-7 flex items-center justify-center p-6 sm:p-12 md:p-16">
+        <div className="w-full max-w-md bg-white dark:bg-card p-8 sm:p-10 rounded-2xl shadow-xl border border-slate-100/80 dark:border-zinc-800/80 transition-all duration-300">
+          
+          {/* Card Top Logo */}
+          <div className="flex items-center gap-2 mb-8 select-none">
+            <img 
+              src="/logo.png" 
+              alt="WorkDesk" 
+              className="h-12 w-auto object-contain mix-blend-multiply dark:bg-white dark:mix-blend-normal dark:p-1.5 dark:rounded-lg"
+            />
+          </div>
+
+          <Tabs defaultValue="signin" className="w-full">
+            <TabsList className="grid w-full grid-cols-2 mb-8 bg-slate-100/80 dark:bg-zinc-800/50 p-1 rounded-lg">
+              <TabsTrigger value="signin" className="rounded-md py-2 text-sm font-semibold select-none cursor-pointer data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Sign In</TabsTrigger>
+              <TabsTrigger value="signup" className="rounded-md py-2 text-sm font-semibold select-none cursor-pointer data-[state=active]:bg-primary data-[state=active]:text-primary-foreground">Sign Up</TabsTrigger>
+            </TabsList>
+            
+            {/* Sign In Tab */}
+            <TabsContent value="signin">
+              <form onSubmit={handleSignIn} className="space-y-5">
+                <div className="space-y-1.5">
+                  <Label htmlFor="si-identifier" className="text-[10px] font-bold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                    User ID or Email
+                  </Label>
+                  <Input
+                    id="si-identifier"
+                    type="text"
+                    placeholder="e.g. emp_101 or name@company.com"
+                    required
+                    className="bg-slate-50 dark:bg-zinc-800/40 border border-slate-200/50 dark:border-zinc-800/50 focus-visible:bg-white dark:focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-primary h-11 px-4 text-slate-800 dark:text-slate-200 rounded-lg placeholder:text-slate-400/80 dark:placeholder:text-zinc-500"
+                    value={signInIdentifier}
+                    onChange={(e) => setSignInIdentifier(e.target.value)}
+                  />
+                </div>
+                
+                <div className="space-y-1.5 relative">
+                  <div className="flex justify-between items-center">
+                    <Label htmlFor="si-pw" className="text-[10px] font-bold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                      Password
+                    </Label>
+                    <button
+                      type="button"
+                      className="text-xs text-primary hover:underline select-none font-medium cursor-pointer"
+                      onClick={() => setResetDialogOpen(true)}
+                    >
+                      Forgot password?
+                    </button>
                   </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="si-pw">Password</Label>
+                  <div className="relative">
                     <Input
                       id="si-pw"
-                      type="password"
+                      type={showPassword ? "text" : "password"}
                       required
+                      className="bg-slate-50 dark:bg-zinc-800/40 border border-slate-200/50 dark:border-zinc-800/50 focus-visible:bg-white dark:focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-primary h-11 pl-4 pr-10 text-slate-800 dark:text-slate-200 rounded-lg"
                       value={signInPw}
                       onChange={(e) => setSignInPw(e.target.value)}
                     />
+                    <button
+                      type="button"
+                      className="absolute right-3.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:text-zinc-500 dark:hover:text-zinc-300 transition-colors cursor-pointer"
+                      onClick={() => setShowPassword(!showPassword)}
+                    >
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
-                  <Button type="submit" className="w-full" disabled={busy}>
-                    {busy ? "Signing in…" : "Sign in"}
-                  </Button>
-                </form>
-              </TabsContent>
-              
-              <TabsContent value="signup">
-                <form onSubmit={handleSignUp} className="space-y-4">
-                  <div className="space-y-2">
-                    <Label htmlFor="su-name">Full Name</Label>
-                    <Input
-                      id="su-name"
-                      type="text"
-                      required
-                      value={signUpName}
-                      onChange={(e) => setSignUpName(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="su-email">Email</Label>
-                    <Input
-                      id="su-email"
-                      type="email"
-                      required
-                      value={signUpEmail}
-                      onChange={(e) => setSignUpEmail(e.target.value)}
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label htmlFor="su-pw">Password</Label>
-                    <Input
-                      id="su-pw"
-                      type="password"
-                      required
-                      value={signUpPw}
-                      onChange={(e) => setSignUpPw(e.target.value)}
-                      placeholder="Min 6 characters"
-                    />
-                  </div>
-                  <Button type="submit" className="w-full" disabled={busy}>
-                    {busy ? "Creating account…" : "Create Account"}
-                  </Button>
-                </form>
-              </TabsContent>
-            </Tabs>
+                </div>
+                
+                <Button 
+                  type="submit" 
+                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium h-11 rounded-lg shadow-sm transition-colors mt-2 select-none cursor-pointer" 
+                  disabled={busy}
+                >
+                  {busy ? "Signing in…" : "Sign In"}
+                </Button>
+              </form>
+            </TabsContent>
+            
+            {/* Sign Up Tab */}
+            <TabsContent value="signup">
+              <form onSubmit={handleSignUp} className="space-y-5">
+                <div className="space-y-1.5">
+                  <Label htmlFor="su-name" className="text-[10px] font-bold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                    Full Name
+                  </Label>
+                  <Input
+                    id="su-name"
+                    type="text"
+                    required
+                    className="bg-slate-50 dark:bg-zinc-800/40 border border-slate-200/50 dark:border-zinc-800/50 focus-visible:bg-white dark:focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-primary h-11 px-4 text-slate-800 dark:text-slate-200 rounded-lg placeholder:text-slate-400/80 dark:placeholder:text-zinc-500"
+                    value={signUpName}
+                    onChange={(e) => setSignUpName(e.target.value)}
+                  />
+                </div>
+                
+                <div className="space-y-1.5">
+                  <Label htmlFor="su-email" className="text-[10px] font-bold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                    Email
+                  </Label>
+                  <Input
+                    id="su-email"
+                    type="email"
+                    required
+                    className="bg-slate-50 dark:bg-zinc-800/40 border border-slate-200/50 dark:border-zinc-800/50 focus-visible:bg-white dark:focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-primary h-11 px-4 text-slate-800 dark:text-slate-200 rounded-lg placeholder:text-slate-400/80 dark:placeholder:text-zinc-500"
+                    value={signUpEmail}
+                    onChange={(e) => setSignUpEmail(e.target.value)}
+                  />
+                </div>
+                
+                <div className="space-y-1.5">
+                  <Label htmlFor="su-pw" className="text-[10px] font-bold tracking-widest text-slate-400 dark:text-slate-500 uppercase">
+                    Password
+                  </Label>
+                  <Input
+                    id="su-pw"
+                    type="password"
+                    required
+                    placeholder="Min 6 characters"
+                    className="bg-slate-50 dark:bg-zinc-800/40 border border-slate-200/50 dark:border-zinc-800/50 focus-visible:bg-white dark:focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-primary h-11 px-4 text-slate-800 dark:text-slate-200 rounded-lg placeholder:text-slate-400/80 dark:placeholder:text-zinc-500"
+                    value={signUpPw}
+                    onChange={(e) => setSignUpPw(e.target.value)}
+                  />
+                </div>
+                
+                <Button 
+                  type="submit" 
+                  className="w-full bg-primary hover:bg-primary/90 text-primary-foreground font-medium h-11 rounded-lg shadow-sm transition-colors mt-2 select-none cursor-pointer" 
+                  disabled={busy}
+                >
+                  {busy ? "Creating account…" : "Create Account"}
+                </Button>
+              </form>
+            </TabsContent>
+          </Tabs>
 
-            <div className="relative my-6">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-card px-2 text-muted-foreground">Or explore WorkDesk</span>
-              </div>
+          <div className="relative my-8 select-none">
+            <div className="absolute inset-0 flex items-center">
+              <span className="w-full border-t border-slate-100 dark:border-zinc-800" />
             </div>
+            <div className="relative flex justify-center text-xs uppercase">
+              <span className="bg-white dark:bg-card px-3 text-slate-400 dark:text-zinc-500 font-semibold tracking-wider text-[10px]">
+                Or explore WorkDesk
+              </span>
+            </div>
+          </div>
 
-            <Button
-              variant="outline"
-              type="button"
-              className="w-full border-primary/30 text-primary hover:bg-primary/5 hover:text-primary transition-all duration-300 font-semibold cursor-pointer"
-              onClick={handleDemoLogin}
-              disabled={busy}
-            >
-              🚀 Launch Interactive Demo
-            </Button>
-          </CardContent>
-        </Card>
+          <Button
+            variant="outline"
+            type="button"
+            className="w-full border-primary/30 text-primary hover:bg-primary/5 hover:text-primary transition-all font-semibold h-11 rounded-lg flex items-center justify-center gap-2 cursor-pointer select-none"
+            onClick={handleDemoLogin}
+            disabled={busy}
+          >
+            <Sparkles size={16} className="animate-spin text-primary" style={{ animationDuration: '3s' }} /> Launch Interactive Demo
+          </Button>
+        </div>
       </div>
+
+      {/* Reset Password Dialog */}
+      <Dialog open={resetDialogOpen} onOpenChange={setResetDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Reset Password</DialogTitle>
+            <DialogDescription>
+              Enter your email address and we'll send you a recovery link to reset your password.
+            </DialogDescription>
+          </DialogHeader>
+          <form onSubmit={handleForgotPassword} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="reset-email">Email Address</Label>
+              <Input
+                id="reset-email"
+                type="email"
+                required
+                placeholder="e.g. name@company.com"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                className="bg-slate-50 dark:bg-zinc-800/40 border border-slate-200/50 dark:border-zinc-800/50 focus-visible:bg-white dark:focus-visible:bg-zinc-900 focus-visible:ring-1 focus-visible:ring-primary h-11 px-4 text-slate-800 dark:text-slate-200 rounded-lg placeholder:text-slate-400/80 dark:placeholder:text-zinc-500"
+              />
+            </div>
+            <DialogFooter className="pt-2">
+              <Button type="submit" disabled={resetBusy} className="bg-primary hover:bg-primary/90 text-primary-foreground font-medium h-11 rounded-lg w-full cursor-pointer select-none">
+                {resetBusy ? "Sending link…" : "Send Reset Link"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

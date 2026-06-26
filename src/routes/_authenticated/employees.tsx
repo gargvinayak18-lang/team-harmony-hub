@@ -136,6 +136,7 @@ function EmployeesPage() {
         {isManager && (
           <div className="flex gap-2">
             <AddEmployeeDialog depts={data?.depts || []} roles={data?.sysRoles || []} onChanged={refetch} />
+            <AuthorizeEmailDialog depts={data?.depts || []} roles={data?.sysRoles || []} />
             <EditRolesDialog
               employees={data?.employees ?? []}
               depts={data?.depts || []} 
@@ -287,8 +288,8 @@ function AddEmployeeDialog({ depts, roles, onChanged }: { depts: Dept[], roles: 
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (!name || !customId || !password || !deptId || !roleId) {
-      return toast.error("Please fill in name, User ID, password, department, and role");
+    if (!name || !customId || !email || !password || !deptId || !roleId) {
+      return toast.error("Please fill in name, User ID, email, password, department, and role");
     }
 
     if (password.length < 6) {
@@ -297,8 +298,40 @@ function AddEmployeeDialog({ depts, roles, onChanged }: { depts: Dept[], roles: 
 
     setBusy(true);
 
-    const sanitizedPrefix = customId.trim().replace(/@/g, ".");
-    const emailToUse = email.trim() || `${sanitizedPrefix}@workdesk.local`;
+    const emailToUse = email.trim();
+
+    // Check if the email already exists in profiles
+    const { data: existingProfile, error: checkError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("email", emailToUse)
+      .maybeSingle();
+
+    if (checkError) {
+      setBusy(false);
+      return toast.error("Failed to check existing email: " + checkError.message);
+    }
+    if (existingProfile) {
+      setBusy(false);
+      return toast.error(`An employee with email "${emailToUse}" already exists.`);
+    }
+
+    // Check if custom ID already exists in profiles (scoped to this org)
+    const { data: existingCustomId, error: checkCustomIdError } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("custom_id", customId.trim())
+      .eq("organization_id", profile?.organization_id!)
+      .maybeSingle();
+
+    if (checkCustomIdError) {
+      setBusy(false);
+      return toast.error("Failed to check custom user ID: " + checkCustomIdError.message);
+    }
+    if (existingCustomId) {
+      setBusy(false);
+      return toast.error(`An employee with Custom User ID "${customId.trim()}" already exists in this organization.`);
+    }
 
     try {
       let signUpData: any;
@@ -400,8 +433,8 @@ function AddEmployeeDialog({ depts, roles, onChanged }: { depts: Dept[], roles: 
             <Input required value={customId} onChange={(e) => setCustomId(e.target.value)} placeholder="e.g. john_doe" />
           </div>
           <div className="space-y-2">
-            <Label>Email (Optional)</Label>
-            <Input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Defaults to username@workdesk.local" />
+            <Label>Email</Label>
+            <Input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="e.g. employee@company.com" />
           </div>
           <div className="space-y-2">
             <Label>Password</Label>
@@ -432,6 +465,135 @@ function AddEmployeeDialog({ depts, roles, onChanged }: { depts: Dept[], roles: 
           </div>
           <DialogFooter>
             <Button type="submit" disabled={busy}>{busy ? "Creating…" : "Create Employee"}</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function AuthorizeEmailDialog({ depts, roles }: { depts: Dept[], roles: Role[] }) {
+  const { profile } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState("");
+  const [deptId, setDeptId] = useState<string>("");
+  const [roleId, setRoleId] = useState<string>("");
+  const [busy, setBusy] = useState(false);
+
+  const filteredRoles = useMemo(() => {
+    if (!deptId) return [];
+    return roles.filter(r => r.department_id === deptId);
+  }, [deptId, roles]);
+
+  const handleDeptChange = (newDept: string) => {
+    setDeptId(newDept);
+    setRoleId("");
+  };
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    if (!email || !deptId || !roleId) {
+      return toast.error("Please fill in email, department, and role");
+    }
+    setBusy(true);
+
+    try {
+      // 1. Check if email already exists in profiles
+      const { data: existingProfile } = await supabase
+        .from("profiles")
+        .select("id")
+        .eq("email", email.trim())
+        .maybeSingle();
+
+      if (existingProfile) {
+        setBusy(false);
+        return toast.error("An employee with this email is already registered.");
+      }
+
+      // 2. Check if email is already in authorized_emails
+      const { data: existingAuth } = await supabase
+        .from("authorized_emails" as any)
+        .select("email")
+        .eq("email", email.trim())
+        .maybeSingle();
+
+      if (existingAuth) {
+        setBusy(false);
+        return toast.error("This email is already pre-authorized.");
+      }
+
+      // 3. Insert into authorized_emails
+      const { error } = await supabase
+        .from("authorized_emails" as any)
+        .insert({
+          email: email.trim(),
+          organization_id: profile?.organization_id!,
+          department_id: deptId,
+          role_id: roleId,
+        });
+
+      if (error) throw error;
+
+      toast.success("Email pre-authorized successfully!");
+      setOpen(false);
+      setEmail("");
+      setDeptId("");
+      setRoleId("");
+    } catch (err: any) {
+      toast.error(err.message || "An unexpected error occurred");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="outline">
+          <Plus className="h-4 w-4 mr-2" />
+          Authorize Email
+        </Button>
+      </DialogTrigger>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Pre-Authorize Email for Signup</DialogTitle>
+          <DialogDescription>
+            Authorize an email address so the employee can sign up themselves with their chosen password.
+          </DialogDescription>
+        </DialogHeader>
+        <form onSubmit={submit} className="space-y-4">
+          <div className="space-y-2">
+            <Label>Email</Label>
+            <Input 
+              type="email" 
+              required 
+              value={email} 
+              onChange={(e) => setEmail(e.target.value)} 
+              placeholder="e.g. employee@company.com" 
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>Department</Label>
+            <Select value={deptId} onValueChange={handleDeptChange}>
+              <SelectTrigger><SelectValue placeholder="Select Department" /></SelectTrigger>
+              <SelectContent>
+                {depts.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Role</Label>
+            <Select value={roleId} onValueChange={setRoleId} disabled={!deptId}>
+              <SelectTrigger>
+                <SelectValue placeholder={deptId ? "Select Role" : "Select Department First"} />
+              </SelectTrigger>
+              <SelectContent>
+                {filteredRoles.map((r) => <SelectItem key={r.id} value={r.id}>{r.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button type="submit" disabled={busy}>{busy ? "Authorizing…" : "Authorize"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>
